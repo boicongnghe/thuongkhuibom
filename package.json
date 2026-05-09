@@ -1,0 +1,31 @@
+{
+  "name": "tiktok-chot-don",
+  "version": "1.0.0",
+  "description": "Phần mềm chốt đơn realtime cho người bán hàng livestream TikTok",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js"
+  },
+  "keywords": [
+    "tiktok",
+    "live",
+    "chot-don",
+    "thermal-printer"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "mongoose": "^8.23.1",
+    "node-thermal-printer": "^4.6.0",
+    "socket.io": "^4.8.3",
+    "tiktok-live-connector": "^2.1.1-beta1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
