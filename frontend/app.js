@@ -125,7 +125,7 @@ socket.on('comment:new', (data) => {
     </div>
     <div class="comment-text">${escapeHtml(data.comment)}</div>
     <div class="comment-actions">
-      <button class="btn-print" onclick="printComment(${data.id}, this)">
+      <button class="btn-print" onclick="printComment('${data.id}', this)">
         🖨️ In đơn
       </button>
     </div>
@@ -168,8 +168,17 @@ socket.on('order:saved', (data) => {
 });
 
 socket.on('printer:status', ({ status, message }) => {
-  if (status === 'ok') showToast(`🖨️ ${message}`, 'success');
-  else showToast(`❌ ${message}`, 'error', 4000);
+  if (status === 'ok') {
+    showToast(`🖨️ ${message}`, 'success');
+    return;
+  }
+
+  document.querySelectorAll('.btn-print.printing').forEach(btn => {
+    btn.disabled = false;
+    btn.classList.remove('printing');
+    btn.textContent = '🖨️ In đơn';
+  });
+  showToast(`❌ ${message}`, 'error', 4000);
 });
 
 // ── Order Card ────────────────────────────────────────────
@@ -227,10 +236,13 @@ async function checkPrinter() {
     const data = await res.json();
     if (data.ok) {
       printerStatus.className = 'printer-status ok';
-      printerText.textContent = `${data.printerName} · Sẵn sàng`;
+      printerText.textContent = `${data.printerName || 'Máy in'} · Sẵn sàng`;
     } else {
       printerStatus.className = 'printer-status error';
-      printerText.textContent = `Không tìm thấy máy in`;
+      printerText.textContent = data.printerName
+        ? `${data.printerName} · Lỗi máy in`
+        : 'Không tìm thấy máy in';
+      if (data.error) console.error('[Printer Check Error]', data.error);
     }
   } catch {
     printerStatus.className = 'printer-status error';
