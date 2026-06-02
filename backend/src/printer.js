@@ -121,6 +121,21 @@ function sendToPrinter(data) {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+function buildTestEscPos() {
+  const now = new Date().toLocaleString('vi-VN', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  return buildEscPos([
+    centerLine('===================='),
+    centerLine('TEST PRINT'),
+    centerLine('TikTok Order System'),
+    centerLine('Connection Success'),
+    centerLine(now),
+    centerLine('===================='),
+  ]);
+}
+
 async function printComment(data) {
   console.log('[Printer] Bắt đầu in...');
 
@@ -157,7 +172,7 @@ async function checkPrinter() {
     const result = await new Promise((resolve, reject) => {
       execFile('powershell.exe', [
         '-Command',
-        `$p = Get-Printer -Name '${PRINTER_NAME}' -ErrorAction SilentlyContinue; if($p){Write-Output "OK:$($p.PrinterStatus)"}else{Write-Output "NOT_FOUND"}`
+        `$p = Get-Printer -Name '${PRINTER_NAME}' -ErrorAction SilentlyContinue; if(!$p){ Write-Output 'NOT_FOUND'; exit }; $port = $p.PortName; if($port -match '^USB'){ $pnp = Get-PnpDevice -Class 'Printer' -Status 'OK' -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match '^USB' }; if($pnp){ Write-Output 'OK:USB' } else { Write-Output 'OFFLINE:NoUSBDevice' } } else { $s = $p.PrinterStatus.ToString(); if($p.WorkOffline -eq $true -or $s -ne 'Normal'){ Write-Output "OFFLINE:$s" } else { Write-Output "OK:$s" } }`
       ], { timeout: 5000 }, (err, stdout) => {
         if (err) return reject(err);
         resolve(stdout.trim());
@@ -178,4 +193,4 @@ function getPrinterInfo() {
   return { printerName: PRINTER_NAME, printerWidth: PRINTER_WIDTH, lineWidth: LINE_WIDTH };
 }
 
-module.exports = { printComment, checkPrinter, getPrinterInfo };
+module.exports = { printComment, checkPrinter, getPrinterInfo, buildTestEscPos };

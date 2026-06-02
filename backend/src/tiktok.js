@@ -27,12 +27,16 @@ async function connect(username, handlers) {
 
   // Nhận bình luận
   connection.on('chat', (data) => {
+    // FIX: bỏ qua comment rỗng hoặc chỉ có khoảng trắng
+    const rawComment = (data.comment || '').trim();
+    if (!rawComment) return;
+
     const comment = {
-      tiktokUserId: data.userId?.toString() || data.uniqueId,
-      username: data.uniqueId || data.nickname || 'unknown',
-      displayName: data.nickname || data.uniqueId,
-      comment: data.comment,
-      timestamp: new Date().toISOString(),
+      tiktokUserId: data.userId?.toString() || data.uniqueId || 'unknown',
+      username:     data.uniqueId || data.nickname || 'unknown',
+      displayName:  data.nickname || data.uniqueId || 'unknown',
+      comment:      rawComment.slice(0, 500),  // Giới hạn độ dài
+      timestamp:    new Date().toISOString(),
     };
     handlers.onComment?.(comment);
   });
