@@ -82,6 +82,27 @@ const Order = mongoose.model('Order', orderSchema);
 const counterSchema = new mongoose.Schema({ _id: String, seq: { type: Number, default: 0 } });
 const Counter = mongoose.model('Counter', counterSchema);
 
+// Trạng thái máy tính chạy app (máy in, TikTok Live) — để bản web trên Vercel xem được
+const pcStatusSchema = new mongoose.Schema({
+  _id:       String,
+  printer:   { type: Object, default: {} },
+  tiktok:    { type: Object, default: {} },
+  updatedAt: { type: Date, default: Date.now },
+}, { minimize: false });
+const PcStatus = mongoose.model('PcStatus', pcStatusSchema);
+
+async function saveLocalStatus({ printer, tiktok }) {
+  await PcStatus.updateOne(
+    { _id: 'local' },
+    { $set: { printer, tiktok, updatedAt: new Date() } },
+    { upsert: true },
+  );
+}
+
+async function getLocalStatus() {
+  return await PcStatus.findById('local').lean();
+}
+
 // ── Lỗi nghiệp vụ: được phép hiện nguyên thông báo cho người dùng ──
 function businessError(message, status = 400) {
   const err = new Error(message);
@@ -251,9 +272,105 @@ async function getOrderByCommentId(commentId) {
   return await Order.findOne({ commentId }).lean();
 }
 
-async function getOrders({ status, search, page = 1, limit = 20 } = {}) {
+// ── Thống kê đơn hàng ─────────────────────────────────────
+const ORDER_STATUSES = ['pending', 'deposit', 'confirmed', 'shipping', 'completed', 'cancelled'];
+
+/**
+ * Tổng kết đơn theo khoảng thời gian và/hoặc phiên live.
+ * Quy ước: đơn Đã huỷ không tính vào tổng.
+ *   Đã thu       = tiền đơn Hoàn thành + tiền cọc của đơn chưa hoàn thành
+ *   Còn phải thu = Σ max(0, tiền − cọc) của đơn chưa hoàn thành
+ */
+async function getOrderSummary({ from, to, sessionId } = {}) {
+  const match = {};
+  if (sessionId) match.sessionId = sessionId;
+  if (from || to) {
+    match.createdAt = {};
+    if (from) match.createdAt.$gte = from;
+    if (to)   match.createdAt.$lt  = to;
+  }
+  const active = { ...match, status: { $ne: 'cancelled' } };
+
+  const [byStatusRaw, customerCount, topCustomers, comments, commenters, session] = await Promise.all([
+    Order.aggregate([
+      { $match: match },
+      { $group: {
+        _id:       '$status',
+        count:     { $sum: 1 },
+        amount:    { $sum: '$amount' },
+        deposit:   { $sum: '$depositAmount' },
+        remaining: { $sum: { $max: [0, { $subtract: ['$amount', '$depositAmount'] }] } },
+        noAmount:  { $sum: { $cond: [{ $lte: ['$amount', 0] }, 1, 0] } },
+      } },
+    ]),
+    Order.aggregate([{ $match: active }, { $group: { _id: '$tiktokUserId' } }, { $count: 'n' }]),
+    Order.aggregate([
+      { $match: active },
+      { $sort: { createdAt: 1 } },
+      { $group: {
+        _id:         '$tiktokUserId',
+        username:    { $last: '$username' },
+        displayName: { $last: '$displayName' },
+        orders:      { $sum: 1 },
+        amount:      { $sum: '$amount' },
+      } },
+      { $sort: { amount: -1, orders: -1 } },
+      { $limit: 5 },
+    ]),
+    sessionId ? Comment.countDocuments({ sessionId }) : null,
+    sessionId ? Comment.distinct('tiktokUserId', { sessionId }) : null,
+    sessionId ? Session.findById(sessionId).lean().catch(() => null) : null,
+  ]);
+
+  const empty = { count: 0, amount: 0, deposit: 0, remaining: 0, noAmount: 0 };
+  const byKey = Object.fromEntries(byStatusRaw.map(r => [r._id, r]));
+  const byStatus = ORDER_STATUSES.map(s => ({ status: s, ...empty, ...(byKey[s] || {}), _id: undefined }));
+
+  const act       = byStatus.filter(s => s.status !== 'cancelled');
+  const notDone   = act.filter(s => s.status !== 'completed');
+  const completed = byStatus.find(s => s.status === 'completed');
+  const cancelled = byStatus.find(s => s.status === 'cancelled');
+  const sum = (list, k) => list.reduce((t, s) => t + (s[k] || 0), 0);
+
+  const orders     = sum(act, 'count');
+  const amount     = sum(act, 'amount');
+  const noAmount   = sum(act, 'noAmount');
+  const customers  = customerCount[0]?.n || 0;
+  const pricedOrds = orders - noAmount;
+
+  return {
+    session: session ? {
+      id: String(session._id), tiktokUsername: session.tiktokUsername,
+      startedAt: session.startedAt, endedAt: session.endedAt,
+    } : null,
+    totals: {
+      orders,
+      customers,
+      amount,
+      collected:      completed.amount + sum(notDone, 'deposit'),
+      deposit:        sum(notDone, 'deposit'),
+      completed:      completed.amount,
+      remaining:      sum(notDone, 'remaining'),
+      noAmount,
+      avgOrderValue:  pricedOrds > 0 ? Math.round(amount / pricedOrds) : 0,
+      cancelledCount: cancelled.count,
+      cancelledAmount: cancelled.amount,
+      comments:       comments,
+      commenters:     commenters ? commenters.length : null,
+      // Tỉ lệ chốt = số khách đặt / số người bình luận (chỉ tính được theo phiên live)
+      conversionRate: commenters && commenters.length ? Math.round((customers / commenters.length) * 1000) / 10 : null,
+    },
+    byStatus: byStatus.map(({ _id, ...s }) => s),
+    topCustomers: topCustomers.map(c => ({
+      tiktokUserId: c._id, username: c.username, displayName: c.displayName, orders: c.orders, amount: c.amount,
+    })),
+  };
+}
+
+async function getOrders({ status, search, sessionId, page = 1, limit = 20 } = {}) {
   const query = {};
   if (status && status !== 'all') query.status = status;
+  if (sessionId) query.sessionId = sessionId;
   if (search) {
     // FIX: escape RegEx để tránh ReDoS injection
     const safe = escapeRegex(search);
@@ -265,11 +382,27 @@ async function getOrders({ status, search, page = 1, limit = 20 } = {}) {
     ];
   }
   const skip = Math.max(0, (page - 1) * limit);
-  const [orders, total] = await Promise.all([
+  // Tổng tiền của các đơn đang lọc (bỏ đơn huỷ, trừ khi đang lọc riêng "Đã huỷ")
+  const sumQuery = status === 'cancelled' ? query : { ...query, status: query.status || { $ne: 'cancelled' } };
+  const [orders, total, sums] = await Promise.all([
     Order.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Order.countDocuments(query),
+    Order.aggregate([
+      { $match: sumQuery },
+      { $group: {
+        _id: null,
+        count:   { $sum: 1 },
+        amount:  { $sum: '$amount' },
+        deposit: { $sum: '$depositAmount' },
+        noAmount: { $sum: { $cond: [{ $lte: ['$amount', 0] }, 1, 0] } },
+      } },
+    ]),
   ]);
-  return { orders, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) };
+  const s = sums[0] || { count: 0, amount: 0, deposit: 0, noAmount: 0 };
+  return {
+    orders, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)),
+    summary: { count: s.count, amount: s.amount, deposit: s.deposit, noAmount: s.noAmount },
+  };
 }
 
 async function getOrderById(id) {
@@ -466,7 +599,9 @@ module.exports = {
   getAllCustomers, getCustomerByTiktokId, getCustomerComments, getCustomerOrders,
   updateCustomer, searchCustomers,
   createOrder, getOrderByCommentId, getOrders, getOrderById, updateOrderStatus, updateOrderAmount,
+  getOrderSummary,
   Order, Customer, Comment,
   getDashboardStats, getChartData,
+  saveLocalStatus, getLocalStatus,
   getSessionStats,
 };

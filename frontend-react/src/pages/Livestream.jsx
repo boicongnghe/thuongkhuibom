@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import socket, { realtimeEnabled } from '../socket';
 import { api } from '../api';
-import { formatTime, getInitials, looksLikeOrder } from '../utils';
+import { formatTime, getInitials, looksLikeOrder, describePrinter, formatCurrency, formatVndShort } from '../utils';
 import { useApp } from '../context/AppContext';
+import OrderSummary from '../components/OrderSummary';
+import QuickAmount from '../components/QuickAmount';
+import StatusBadge from '../components/StatusBadge';
 
 export default function Livestream() {
   const { settings, isConnected, setIsConnected, tiktokUsername, setTiktokUsername, showToast } = useApp();
@@ -15,14 +18,17 @@ export default function Livestream() {
   const [printedIds, setPrintedIds]         = useState(new Set());
 
   const [commentCount, setCommentCount]     = useState(0);
-  const [orderCount, setOrderCount]         = useState(0);
   const [customerCount, setCustomerCount]   = useState(0);
 
-  const [orders, setOrders]                 = useState([]);
+  // Tổng kết + danh sách đơn của phiên live (lấy từ DB → tải lại trang không mất)
+  const [summary, setSummary]               = useState(null);
+  const [sessionOrders, setSessionOrders]   = useState([]);
+  const sessionTimer = useRef(null);
   const [customers, setCustomers]           = useState([]);
   const [activeTab, setActiveTab]           = useState('orders');
 
   const [printerInfo, setPrinterInfo]       = useState({ text: 'Kiểm tra...', ok: false });
+  const [remoteTiktok, setRemoteTiktok]     = useState(null);   // chỉ dùng ở bản web (Vercel)
   const [printingIds, setPrintingIds]       = useState(new Set());
   // Bản sao dạng ref: handler socket (đăng ký 1 lần) luôn đọc được giá trị mới nhất
   const printingRef = useRef(new Set());
@@ -33,10 +39,30 @@ export default function Livestream() {
   useEffect(() => {
     loadCustomers();
     loadRecentComments();
+    loadSession();
     checkPrinter();
-    const t = setInterval(checkPrinter, 30000);
-    return () => clearInterval(t);
+    const t = setInterval(() => { checkPrinter(); loadSession(); }, 30000);
+    return () => { clearInterval(t); clearTimeout(sessionTimer.current); };
   }, []);
+
+  async function loadSession() {
+    try {
+      const sum = await api.getSummary('session');
+      setSummary(sum);
+      if (sum.session?.id) {
+        const res = await api.getOrders({ sessionId: sum.session.id, limit: 100, status: 'all' });
+        setSessionOrders(res.orders);
+      } else {
+        setSessionOrders([]);
+      }
+    } catch {}
+  }
+
+  // Nhiều sự kiện dồn dập (chốt liên tục) → chỉ tải lại 1 lần sau 300ms
+  function refreshSessionSoon() {
+    clearTimeout(sessionTimer.current);
+    sessionTimer.current = setTimeout(loadSession, 300);
+  }
 
   async function loadCustomers() {
     try {
@@ -56,7 +82,6 @@ export default function Livestream() {
       });
       setPrintedIds(prev => new Set([...prev, ...list.filter(c => c.printed).map(c => c.id)]));
       setCommentCount(c => Math.max(c, list.length));
-      setOrderCount(c => Math.max(c, list.filter(c2 => c2.printed).length));
     } catch {}
   }
 
@@ -70,16 +95,9 @@ export default function Livestream() {
   async function checkPrinter() {
     try {
       const d = await api.checkPrinter();
-      if (d.ok) {
-        setPrinterInfo({ text: `${d.printerName} · Sẵn sàng`, ok: true });
-      } else {
-        const st = d.status || '';
-        const msg = st === 'NOT_LOCAL' ? 'Máy in: chỉ trên máy tính'
-          : st === 'NOT_FOUND' ? 'Không tìm thấy máy in'
-          : st.startsWith('OFFLINE') ? `${d.printerName} · Chưa kết nối`
-          : `${d.printerName} · Lỗi`;
-        setPrinterInfo({ text: msg, ok: false });
-      }
+      setPrinterInfo(describePrinter(d));
+      // Bản web: trạng thái TikTok Live lấy từ máy tính chạy app (qua MongoDB)
+      if (d.remote) setRemoteTiktok(d.tiktok || { connected: false });
     } catch {
       setPrinterInfo({ text: 'Lỗi kiểm tra máy in', ok: false });
     }
@@ -124,11 +142,13 @@ export default function Livestream() {
     }
 
     function onOrderSaved(data) {
-      setOrderCount(c => c + 1);
       setPrintedIds(prev => new Set([...prev, data.commentId]));
-      setOrders(prev => [data, ...prev].slice(0, 100));
       loadCustomers();
+      refreshSessionSoon();
     }
+
+    // Đổi trạng thái / sửa tiền / tạo đơn ở thiết bị khác → cập nhật tổng kết
+    function onOrderChanged() { refreshSessionSoon(); }
 
     function onPrinterStatus({ status, message, commentId }) {
       if (commentId) setPrinting(commentId, false);
@@ -148,6 +168,8 @@ export default function Livestream() {
     socket.on('order:saved',    onOrderSaved);
     socket.on('printer:status', onPrinterStatus);
     socket.on('order:exists',   onOrderExists);
+    socket.on('order:updated',        onOrderChanged);
+    socket.on('order:status_changed', onOrderChanged);
 
     return () => {
       socket.off('tiktok:status',  onStatus);
@@ -156,6 +178,8 @@ export default function Livestream() {
       socket.off('order:saved',    onOrderSaved);
       socket.off('printer:status', onPrinterStatus);
       socket.off('order:exists',   onOrderExists);
+      socket.off('order:updated',        onOrderChanged);
+      socket.off('order:status_changed', onOrderChanged);
     };
   }, [settings]);
 
@@ -191,10 +215,13 @@ export default function Livestream() {
       {/* Header */}
       <header className="header">
         <div className="header-left">
-          <div className={`tiktok-badge${isConnected ? ' connected' : ''}`}>
+          <div className={`tiktok-badge${isConnected || remoteTiktok?.connected ? ' connected' : ''}`}>
             <span className="badge-dot" />
             <span className="badge-text">
-              {connecting ? 'Đang kết nối...' : isConnected ? `@${tiktokUsername}` : 'Chưa kết nối'}
+              {connecting ? 'TikTok: đang kết nối...'
+                : isConnected ? `TikTok: @${tiktokUsername}`
+                : remoteTiktok?.connected ? `TikTok: @${remoteTiktok.username} (trên máy tính)`
+                : 'TikTok: chưa kết nối'}
             </span>
           </div>
         </div>
@@ -229,22 +256,36 @@ export default function Livestream() {
         </div>
       )}
 
-      {/* Stats bar */}
-      <div className="stats-bar">
+      {/* Stats bar — tổng kết phiên live, cập nhật ngay khi chốt đơn */}
+      <div className="stats-bar" aria-live="polite">
         <div className="stat-item">
-          <span className="stat-number">{commentCount}</span>
+          <span className="stat-number">{summary?.totals?.comments ?? commentCount}</span>
           <span className="stat-label">Bình luận</span>
         </div>
         <div className="stat-divider" />
         <div className="stat-item">
-          <span className="stat-number">{orderCount}</span>
-          <span className="stat-label">Đã chốt</span>
+          <span className="stat-number">{summary?.totals?.orders ?? 0}</span>
+          <span className="stat-label">Đơn</span>
         </div>
         <div className="stat-divider" />
-        <div className="stat-item">
-          <span className="stat-number">{customerCount}</span>
-          <span className="stat-label">Khách hàng</span>
+        <div className="stat-item" title={formatCurrency(summary?.totals?.amount || 0)}>
+          <span className="stat-number">{formatVndShort(summary?.totals?.amount || 0)}</span>
+          <span className="stat-label">Tổng tiền</span>
         </div>
+        <div className="stat-divider" />
+        <div className="stat-item" title={formatCurrency(summary?.totals?.remaining || 0)}>
+          <span className="stat-number stat-warn">{formatVndShort(summary?.totals?.remaining || 0)}</span>
+          <span className="stat-label">Còn thu</span>
+        </div>
+        {summary?.totals?.noAmount > 0 && (
+          <>
+            <div className="stat-divider" />
+            <div className="stat-item">
+              <span className="stat-number stat-alert">{summary.totals.noAmount}</span>
+              <span className="stat-label">Chưa nhập tiền</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Main */}
@@ -312,7 +353,10 @@ export default function Livestream() {
         <section className="panel panel-orders">
           <div className="tabs">
             <button className={`tab${activeTab === 'orders' ? ' active' : ''}`} onClick={() => setActiveTab('orders')}>
-              📋 Đã chốt ({orderCount})
+              📋 Đã chốt ({summary?.totals?.orders ?? 0})
+            </button>
+            <button className={`tab${activeTab === 'summary' ? ' active' : ''}`} onClick={() => setActiveTab('summary')}>
+              📊 Tổng kết
             </button>
             <button className={`tab${activeTab === 'customers' ? ' active' : ''}`} onClick={() => setActiveTab('customers')}>
               👥 Khách hàng ({customerCount})
@@ -322,19 +366,34 @@ export default function Livestream() {
           {/* Orders tab */}
           <div className={`tab-content${activeTab === 'orders' ? ' active' : ''}`}>
             <div className="order-list">
-              {!orders.length
+              {!sessionOrders.length
                 ? <div className="empty-state"><div className="empty-icon">🛒</div><p>Chưa có đơn nào được chốt</p></div>
-                : orders.map((o, i) => (
-                  <div key={`${o.commentId}-${i}`} className="order-card">
+                : sessionOrders.map(o => (
+                  <div key={o._id} className={`order-card${o.status === 'cancelled' ? ' is-cancelled' : ''}`}>
                     <div className="order-header">
                       <span className="order-username">@{o.username}</span>
-                      <span className="order-badge">{o.totalOrders} đơn</span>
+                      <StatusBadge status={o.status} />
                     </div>
-                    <div className="order-comment">{o.comment}</div>
-                    <div className="order-time">{formatTime(o.timestamp)} · {o.orderNumber || o.tiktokUserId}</div>
+                    <div className="order-comment">{o.note}</div>
+                    <div className="order-foot">
+                      <span className="order-time">{formatTime(o.createdAt)} · {o.orderNumber}</span>
+                      <QuickAmount
+                        key={`${o._id}-${o.amount}-${o.status}`}
+                        order={o}
+                        onSaved={() => { showToast(`Đã lưu tiền ${o.orderNumber}`, 'success'); loadSession(); }}
+                        onError={(msg) => showToast(`Lỗi: ${msg}`, 'error')}
+                      />
+                    </div>
                   </div>
                 ))
               }
+            </div>
+          </div>
+
+          {/* Summary tab */}
+          <div className={`tab-content${activeTab === 'summary' ? ' active' : ''}`}>
+            <div className="summary-scroll">
+              <OrderSummary data={summary} compact />
             </div>
           </div>
 

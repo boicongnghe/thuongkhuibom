@@ -38,6 +38,19 @@ function parseAmount(val) {
   return Number.isSafeInteger(n) && n >= 0 && n <= MAX_AMOUNT ? n : NaN;
 }
 
+const SUMMARY_SCOPES = ['session', 'today', '7d', '30d', 'all'];
+
+// 0h ngày hôm nay (giờ Việt Nam, UTC+7, không có giờ mùa hè) lùi về `daysBack` ngày
+function vnDayStart(daysBack = 0) {
+  const VN_OFFSET = 7 * 3600 * 1000;
+  const vnNow = new Date(Date.now() + VN_OFFSET);
+  const startUtc = Date.UTC(vnNow.getUTCFullYear(), vnNow.getUTCMonth(), vnNow.getUTCDate()) - VN_OFFSET;
+  return new Date(startUtc - daysBack * 24 * 3600 * 1000);
+}
+
+// Máy tính gửi trạng thái mỗi 20 giây; quá 60 giây không có tin → coi như máy tính chưa mở app
+const PC_STALE_SEC = 60;
+
 // ── Order status machine ──────────────────────────────────
 const VALID_STATUSES = new Set(['pending', 'deposit', 'confirmed', 'shipping', 'completed', 'cancelled']);
 const STATUS_TRANSITIONS = {
@@ -111,6 +124,27 @@ function createApp({ io = null, getLive = () => ({ sessionId: null, live: false 
     }
   });
 
+  // ── Tổng kết đơn hàng ───────────────────────────────────
+  // scope: session (phiên live hiện tại/gần nhất) | today | 7d | 30d | all
+  app.get('/api/stats/summary', async (req, res) => {
+    try {
+      const scope = SUMMARY_SCOPES.includes(req.query.scope) ? req.query.scope : 'session';
+      let filter = {};
+      if (scope === 'session') {
+        const reqSession = typeof req.query.sessionId === 'string' && isValidObjectId(req.query.sessionId)
+          ? req.query.sessionId : null;
+        const sessionId = reqSession || getLive().sessionId || await db.getLatestSessionId();
+        if (!sessionId) return res.json({ scope, session: null, totals: null, byStatus: [], topCustomers: [] });
+        filter = { sessionId };
+      } else if (scope !== 'all') {
+        filter = { from: vnDayStart(scope === 'today' ? 0 : scope === '7d' ? 6 : 29) };
+      }
+      res.json({ scope, ...(await db.getOrderSummary(filter)) });
+    } catch (err) {
+      sendError(res, err, 'stats/summary');
+    }
+  });
+
   // ── Comments ────────────────────────────────────────────
   // Bình luận gần nhất của phiên đang live (hoặc phiên gần nhất) — dùng khi tải lại trang
   app.get('/api/comments/recent', async (req, res) => {
@@ -132,7 +166,9 @@ function createApp({ io = null, getLive = () => ({ sessionId: null, live: false 
       const search = sanitizeStr(req.query.search, 200);
       const page   = Math.max(1, parseInt(req.query.page)  || 1);
       const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-      res.json(await db.getOrders({ status, search, page, limit }));
+      const sessionId = typeof req.query.sessionId === 'string' && isValidObjectId(req.query.sessionId)
+        ? req.query.sessionId : undefined;
+      res.json(await db.getOrders({ status, search, sessionId, page, limit }));
     } catch (err) {
       sendError(res, err, 'orders');
     }
@@ -309,8 +345,21 @@ function createApp({ io = null, getLive = () => ({ sessionId: null, live: false 
   if (registerLocalRoutes) {
     registerLocalRoutes(app);
   } else {
-    app.get('/api/printer/check', (req, res) => {
-      res.json({ ok: false, printerName: '', status: 'NOT_LOCAL', error: 'Máy in chỉ dùng được khi chạy app trên máy tính' });
+    // Vercel không thấy máy in → đọc trạng thái mà máy tính chạy app gửi lên MongoDB
+    app.get('/api/printer/check', async (req, res) => {
+      try {
+        const pc = await db.getLocalStatus();
+        const ageSec = pc ? Math.round((Date.now() - new Date(pc.updatedAt).getTime()) / 1000) : null;
+        if (!pc || ageSec > PC_STALE_SEC) {
+          return res.json({
+            ok: false, printerName: pc?.printer?.printerName || '', status: 'PC_OFFLINE', remote: true,
+            lastSeenSec: ageSec, tiktok: { connected: false },
+          });
+        }
+        res.json({ ...pc.printer, remote: true, lastSeenSec: ageSec, tiktok: pc.tiktok || { connected: false } });
+      } catch (err) {
+        sendError(res, err, 'printer/check (remote)');
+      }
     });
     app.post('/api/printer/test-ip', (req, res) => {
       res.status(400).json({ error: 'In thử chỉ dùng được khi chạy app trên máy tính có máy in' });
@@ -323,4 +372,4 @@ function createApp({ io = null, getLive = () => ({ sessionId: null, live: false 
   return app;
 }
 
-module.exports = { createApp, sanitizeStr, OBJECTID_RE };
+module.exports = { createApp, sanitizeStr, OBJECTID_RE, vnDayStart };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
-import { looksLikeOrder } from '../utils';
+import { looksLikeOrder, describePrinter } from '../utils';
 
 export default function Printer() {
   const { settings, saveSettings, showToast } = useApp();
@@ -35,13 +35,12 @@ export default function Printer() {
   }, [settings]);
 
   useEffect(() => {
-    api.checkPrinter().then(d => {
-      setPrinterInfo(d.ok
-        ? { text: `${d.printerName} · Sẵn sàng`, ok: true }
-        : { text: d.status === 'NOT_LOCAL' ? 'Máy in chỉ dùng được trên máy tính'
-              : d.status === 'NOT_FOUND' ? 'Không tìm thấy máy in' : `${d.printerName} · Chưa kết nối`, ok: false }
-      );
-    }).catch(() => setPrinterInfo({ text: 'Lỗi kiểm tra', ok: false }));
+    const check = () => api.checkPrinter()
+      .then(d => setPrinterInfo(describePrinter(d)))
+      .catch(() => setPrinterInfo({ text: 'Lỗi kiểm tra', ok: false }));
+    check();
+    const t = setInterval(check, 30000);
+    return () => clearInterval(t);
   }, []);
 
   async function handleConnTypeChange(t) {

@@ -18,6 +18,9 @@ export const api = {
   getDashboard: ()                       => request('/api/dashboard'),
   getChart: (period, count)              => request(`/api/stats/chart?period=${period}&count=${count}`),
 
+  // Tổng kết đơn: scope = session | today | 7d | 30d | all
+  getSummary: (scope = 'session')        => request(`/api/stats/summary?scope=${scope}`),
+
   // Comments (tải lại bình luận của phiên live khi mở trang)
   getRecentComments: (limit = 200)       => request(`/api/comments/recent?limit=${limit}`),
 

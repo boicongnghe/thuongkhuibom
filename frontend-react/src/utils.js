@@ -55,6 +55,63 @@ export function looksLikeOrder(text, { keywords = 'chốt, lấy, mua, đặt', 
   return false;
 }
 
+/**
+ * Chữ hiển thị trạng thái máy in từ kết quả /api/printer/check.
+ * remote = true: bản web (Vercel) đọc trạng thái mà máy tính chạy app gửi lên.
+ */
+export function describePrinter(d) {
+  const st   = d?.status || '';
+  const name = d?.printerName || 'Máy in';
+  const ago  = d?.remote && d.lastSeenSec != null ? ` (cập nhật ${d.lastSeenSec}s trước)` : '';
+  if (st === 'PC_OFFLINE') {
+    return { ok: false, text: 'Máy tính chưa mở app — không biết trạng thái máy in' };
+  }
+  if (d?.ok) return { ok: true, text: `${name} · Sẵn sàng${ago}` };
+  if (st === 'NOT_LOCAL') return { ok: false, text: 'Máy in: chỉ trên máy tính' };
+  if (st === 'NOT_FOUND') return { ok: false, text: `Không tìm thấy máy in ${name}${ago}` };
+  if (st.startsWith('OFFLINE')) return { ok: false, text: `${name} · Chưa kết nối${ago}` };
+  return { ok: false, text: `${name} · Lỗi${ago}` };
+}
+
+const MAX_VND = 1_000_000_000;
+
+/**
+ * Đọc số tiền gõ nhanh kiểu người bán hàng, trả về số nguyên VND hoặc null nếu không hiểu.
+ *   "189000" | "189.000" | "189,000" → 189000
+ *   "189k" | "189 nghìn"             → 189000
+ *   "189"  (số < 1000)               → 189000   (bán live hay gõ tắt nghìn đồng)
+ *   "1tr2" → 1200000 · "1.5tr" → 1500000 · "2tr" → 2000000
+ */
+export function parseVnd(input) {
+  let s = normalizeVi(input).replace(/\s+/g, '').replace(/(vnd|dong|d)$/, '');
+  if (!s) return null;
+  let v = null;
+  let m;
+  if ((m = s.match(/^(\d+(?:[.,]\d+)?)(tr|trieu|m)(\d{1,3})?$/))) {
+    const base = parseFloat(m[1].replace(',', '.'));
+    const tail = m[3] ? Number(m[3].padEnd(3, '0')) * 1000 : 0;   // 1tr2 → 200.000
+    v = base * 1_000_000 + tail;
+  } else if ((m = s.match(/^(\d+(?:[.,]\d+)?)(k|nghin|ngan|n)$/))) {
+    v = parseFloat(m[1].replace(',', '.')) * 1000;
+  } else if (/^\d{1,3}([.,]\d{3})+$/.test(s)) {
+    v = Number(s.replace(/[.,]/g, ''));
+  } else if (/^\d+$/.test(s)) {
+    v = Number(s);
+    if (v > 0 && v < 1000) v *= 1000;
+  }
+  if (v === null || !Number.isFinite(v)) return null;
+  v = Math.round(v);
+  return v >= 0 && v <= MAX_VND ? v : null;
+}
+
+// Số tiền gọn cho chỗ hẹp: 950.000đ → "950k", 1.250.000đ → "1,25tr"
+export function formatVndShort(amount) {
+  const n = Number(amount) || 0;
+  if (n >= 1_000_000) return `${(Math.round(n / 10_000) / 100).toLocaleString('vi-VN')}tr`;
+  if (n >= 1000) return `${(Math.round(n / 100) / 10).toLocaleString('vi-VN')}k`;
+  return `${n.toLocaleString('vi-VN')}đ`;
+}
+
 export function getInitials(username) {
   return (username || '?').replace('@', '').slice(0, 2).toUpperCase();
 }

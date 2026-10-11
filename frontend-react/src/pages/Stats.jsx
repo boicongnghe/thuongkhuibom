@@ -4,6 +4,16 @@ import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement
 import { api } from '../api';
 import { formatCurrency, formatDate, getInitials, buildDayLabels, mapChartDataToLabels, buildStatsLabels } from '../utils';
 import { useApp } from '../context/AppContext';
+import OrderSummary from '../components/OrderSummary';
+
+// Bảng tổng kết chi tiết: số đơn, tiền, đã thu, còn phải thu...
+const SUMMARY_SCOPES = [
+  { key: 'session', label: 'Phiên live' },
+  { key: 'today',   label: 'Hôm nay' },
+  { key: '7d',      label: '7 ngày' },
+  { key: '30d',     label: '30 ngày' },
+  { key: 'all',     label: 'Tất cả' },
+];
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Filler, Tooltip);
 
@@ -24,6 +34,17 @@ export default function Stats() {
   const [periodIdx, setPeriodIdx]     = useState(0);
   const [chartData, setChartData]     = useState(null);
   const [customers, setCustomers]     = useState([]);
+  const [sumScope, setSumScope]       = useState('today');
+  const [summary, setSummary]         = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    setSummary(null);
+    api.getSummary(sumScope)
+      .then(d => { if (alive) setSummary(d); })
+      .catch(() => showToast('Lỗi tải tổng kết', 'error'));
+    return () => { alive = false; };
+  }, [sumScope]);
 
   const { period, count } = PERIODS[periodIdx];
 
@@ -101,6 +122,22 @@ th{background:#f0f0f0}tr:nth-child(even)td{background:#fafafa}
           <button className="btn-outline" onClick={exportCSV}>📊 Xuất Excel</button>
           <button className="btn-outline" onClick={exportPDF}>📄 Xuất PDF</button>
         </div>
+      </div>
+
+      {/* Tổng kết chi tiết */}
+      <div className="stats-table-card">
+        <div className="stats-table-title" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>Tổng kết đơn hàng</span>
+          <div className="period-bar" role="group" aria-label="Khoảng thời gian tổng kết" style={{ padding: 0, background: 'none', border: 0 }}>
+            {SUMMARY_SCOPES.map(s => (
+              <button key={s.key} type="button" aria-pressed={sumScope === s.key}
+                className={`period-btn${sumScope === s.key ? ' active' : ''}`} onClick={() => setSumScope(s.key)}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {summary ? <OrderSummary data={summary} /> : <div className="sum-empty">Đang tải...</div>}
       </div>
 
       {/* Period */}
