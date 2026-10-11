@@ -100,7 +100,27 @@ app.get('/*path', (req, res, next) => {
 // ── State ─────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
 let currentSessionId = null;
+let currentTiktokUsername = null;
 const recentComments = new Set();
+
+// ── Gửi trạng thái máy in + TikTok lên MongoDB để bản web (Vercel) xem được ──
+const STATUS_INTERVAL_MS = 20000;
+let reporting = false;
+async function reportStatus() {
+  if (reporting) return;          // checkPrinter chạy PowerShell, tránh chồng lệnh
+  reporting = true;
+  try {
+    const p = await printer.checkPrinter();
+    await db.saveLocalStatus({
+      printer: { ok: !!p.ok, printerName: p.printerName || '', status: p.status || p.error || '' },
+      tiktok:  { connected: tiktok.isConnected(), username: tiktok.isConnected() ? currentTiktokUsername : null },
+    });
+  } catch (err) {
+    console.error('[Status] Không gửi được trạng thái:', err.message);
+  } finally {
+    reporting = false;
+  }
+}
 
 // ══════════════════════════════════════════════════════════
 // ── Socket.io ─────────────────────────────────────────────
@@ -133,7 +153,9 @@ io.on('connection', (socket) => {
 
       await tiktok.connect(cleanUsername, {
         onConnected: ({ username: u, roomId }) => {
+          currentTiktokUsername = u;
           io.emit('tiktok:status', { connected: true, username: u, roomId });
+          reportStatus();
         },
 
         onComment: async (data) => {
@@ -174,6 +196,7 @@ io.on('connection', (socket) => {
           await db.endSession(sessionId).catch(e => console.error('[Session]', e.message));
           if (currentSessionId === sessionId) currentSessionId = null;
           io.emit('tiktok:status', { connected: false, username: null });
+          reportStatus();
         },
 
         onError: (msg) => {
@@ -202,6 +225,7 @@ io.on('connection', (socket) => {
       }
       await tiktok.disconnect();
       io.emit('tiktok:status', { connected: false, username: null });
+      reportStatus();
     } catch (err) {
       console.error('[TikTok Disconnect Error]', err.message);
     }
@@ -323,6 +347,8 @@ io.on('connection', (socket) => {
       console.log(`🖨️  Printer: ${process.env.PRINTER_NAME || 'chưa cấu hình'}`);
       console.log(`🏪 Shop: ${process.env.SHOP_NAME || 'SHOP CỦA BẠN'}\n`);
     });
+    reportStatus();
+    setInterval(reportStatus, STATUS_INTERVAL_MS).unref();
   } catch (err) {
     console.error('[MongoDB] Kết nối thất bại:', err.message);
     process.exit(1);

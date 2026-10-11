@@ -167,6 +167,16 @@ export default function Orders() {
         </div>
       </div>
 
+      {/* Tổng của bộ lọc đang chọn */}
+      {data.summary && (
+        <div className="orders-sum" aria-live="polite">
+          <span><strong>{data.summary.count}</strong> đơn{status === 'all' ? ' (không tính huỷ)' : ''}</span>
+          <span>Tổng tiền <strong>{formatCurrency(data.summary.amount)}</strong></span>
+          <span>Đã cọc <strong>{formatCurrency(data.summary.deposit)}</strong></span>
+          {data.summary.noAmount > 0 && <span className="orders-sum-alert">{data.summary.noAmount} đơn chưa nhập tiền</span>}
+        </div>
+      )}
+
       {/* Table */}
       <div className="table-scroll" style={{ flex: 1 }}>
         <table className="data-table">
