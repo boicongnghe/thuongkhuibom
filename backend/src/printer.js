@@ -170,11 +170,14 @@ async function printComment(data) {
 async function checkPrinter() {
   console.log('[Printer] Kiểm tra kết nối...');
   try {
-    // Kiểm tra bằng PowerShell xem printer có tồn tại không
+    // Kiểm tra bằng PowerShell xem printer có tồn tại không.
+    // Máy in USB: tìm thiết bị USBPRINT đang cắm (PresentOnly) gắn với đúng cổng của máy in (vd USB001).
+    // Máy in nhiệt giá rẻ (GEZHI, Xprinter...) Windows xếp vào nhóm "USB" chứ không phải "Printer",
+    // nên không lọc theo -Class 'Printer' (cách cũ báo sai "chưa kết nối").
     const result = await new Promise((resolve, reject) => {
       execFile('powershell.exe', [
         '-Command',
-        `$p = Get-Printer -Name '${PRINTER_NAME}' -ErrorAction SilentlyContinue; if(!$p){ Write-Output 'NOT_FOUND'; exit }; $port = $p.PortName; if($port -match '^USB'){ $pnp = Get-PnpDevice -Class 'Printer' -Status 'OK' -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match '^USB' }; if($pnp){ Write-Output 'OK:USB' } else { Write-Output 'OFFLINE:NoUSBDevice' } } else { $s = $p.PrinterStatus.ToString(); if($p.WorkOffline -eq $true -or $s -ne 'Normal'){ Write-Output "OFFLINE:$s" } else { Write-Output "OK:$s" } }`
+        `$p = Get-Printer -Name '${PRINTER_NAME}' -ErrorAction SilentlyContinue; if(!$p){ Write-Output 'NOT_FOUND'; exit }; $port = $p.PortName; if($port -match '^USB'){ $pnp = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and $_.InstanceId -match ('^USBPRINT\.*' + [regex]::Escape($port) + '$') }; if($pnp){ Write-Output 'OK:USB' } else { Write-Output 'OFFLINE:NoUSBDevice' } } else { $s = $p.PrinterStatus.ToString(); if($p.WorkOffline -eq $true -or $s -ne 'Normal'){ Write-Output "OFFLINE:$s" } else { Write-Output "OK:$s" } }`
       ], { timeout: 5000 }, (err, stdout) => {
         if (err) return reject(err);
         resolve(stdout.trim());
