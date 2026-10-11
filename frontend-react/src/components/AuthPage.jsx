@@ -64,20 +64,35 @@ export default function AuthPage({ onAuthenticated }) {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
   const [notice, setNotice]     = useState('');
+  const [serverDown, setServerDown] = useState(false);
+  const [checking, setChecking] = useState(true);
   const submitting = useRef(false);
 
   // Chưa có tài khoản nào → mở sẵn tab Đăng ký; đã có → ẩn hẳn tab Đăng ký
-  useEffect(() => {
-    authApi.status()
-      .then(({ registrationOpen: open }) => {
-        setRegistrationOpen(open);
-        if (open) {
-          setTab('register');
-          setNotice('Chưa có tài khoản. Hãy tạo tài khoản đầu tiên — sau đó chức năng đăng ký sẽ tự khoá.');
-        }
-      })
-      .catch(() => setRegistrationOpen(false));
-  }, []);
+  async function checkStatus() {
+    setChecking(true);
+    try {
+      const res = await authApi.status();
+      if (typeof res?.registrationOpen !== 'boolean') throw new Error('bad response');
+      setServerDown(false);
+      setRegistrationOpen(res.registrationOpen);
+      if (res.registrationOpen) {
+        setTab('register');
+        setNotice('Chưa có tài khoản. Hãy tạo tài khoản đầu tiên — sau đó chức năng đăng ký sẽ tự khoá.');
+      } else {
+        setTab('login');
+        setNotice('');
+      }
+    } catch {
+      // Không phân biệt được "đã có tài khoản" hay "chưa" → báo rõ thay vì lặng lẽ ẩn tab Đăng ký
+      setServerDown(true);
+      setRegistrationOpen(false);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => { checkStatus(); }, []);
 
   const isRegister = tab === 'register' && registrationOpen;
 
@@ -162,6 +177,14 @@ export default function AuthPage({ onAuthenticated }) {
           role={registrationOpen ? 'tabpanel' : undefined}
           aria-labelledby={registrationOpen ? (isRegister ? 'tab-register' : 'tab-login') : undefined}
         >
+          {serverDown && (
+            <div className="auth-msg auth-msg-error" role="alert">
+              Không kết nối được máy chủ (backend). Kiểm tra backend đang chạy bản mới nhất rồi thử lại.
+              <button type="button" className="auth-retry" onClick={checkStatus} disabled={checking}>
+                {checking ? 'Đang kiểm tra...' : 'Thử lại'}
+              </button>
+            </div>
+          )}
           {notice && !error && <div className="auth-msg auth-msg-info" role="status">{notice}</div>}
           {error && <div className="auth-msg auth-msg-error" role="alert">{error}</div>}
 
