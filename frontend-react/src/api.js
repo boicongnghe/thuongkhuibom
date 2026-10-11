@@ -1,9 +1,14 @@
+import { API_BASE } from './api/auth';
+
 async function request(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch(API_BASE + url, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'chotdon' },
     ...options,
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
+  // Hết phiên đăng nhập → báo cho App hiện lại trang đăng nhập
+  if (res.status === 401) window.dispatchEvent(new Event('auth:expired'));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
@@ -12,6 +17,9 @@ export const api = {
   // Dashboard
   getDashboard: ()                       => request('/api/dashboard'),
   getChart: (period, count)              => request(`/api/stats/chart?period=${period}&count=${count}`),
+
+  // Comments (tải lại bình luận của phiên live khi mở trang)
+  getRecentComments: (limit = 200)       => request(`/api/comments/recent?limit=${limit}`),
 
   // Orders
   getOrders: (params)                    => request(`/api/orders?${new URLSearchParams(params)}`),

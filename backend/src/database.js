@@ -67,26 +67,54 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ tiktokUserId: 1, createdAt: -1 });
 orderSchema.index({ createdAt: -1 });
+// Mỗi bình luận chỉ tạo được 1 đơn (đơn tạo tay có commentId = null nên không bị ràng buộc)
+orderSchema.index(
+  { commentId: 1 },
+  { unique: true, partialFilterExpression: { commentId: { $type: 'objectId' } } },
+);
+orderSchema.index(
+  { orderNumber: 1 },
+  { unique: true, partialFilterExpression: { orderNumber: { $type: 'string' } } },
+);
 const Order = mongoose.model('Order', orderSchema);
 
+// Bộ đếm số thứ tự đơn theo ngày — tăng nguyên tử trong MongoDB
+const counterSchema = new mongoose.Schema({ _id: String, seq: { type: Number, default: 0 } });
+const Counter = mongoose.model('Counter', counterSchema);
+
+// ── Lỗi nghiệp vụ: được phép hiện nguyên thông báo cho người dùng ──
+function businessError(message, status = 400) {
+  const err = new Error(message);
+  err.expose = true;
+  err.status = status;
+  return err;
+}
+
 // ── Order number sequence ─────────────────────────────────
-let _orderSeq = 0;
-let _orderSeqDate = '';  // Track ngày hiện tại để reset sequence theo ngày
+function _todayYmd() {
+  // sv-SE cho định dạng YYYY-MM-DD; cố định múi giờ VN để không lệch ngày khi server ở nơi khác
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).replaceAll('-', '');
+}
 
+// Lần đầu dùng bộ đếm của 1 ngày: bắt đầu sau số lớn nhất đã có (dữ liệu tạo trước khi có Counter)
+async function _seedCounter(ymd) {
+  const latest = await Order.find({ orderNumber: { $regex: `-${ymd}-\\d+$` } })
+    .select('orderNumber').lean();
+  const maxSeq = latest.reduce((m, o) => Math.max(m, parseInt(o.orderNumber.split('-').pop(), 10) || 0), 0);
+  await Counter.updateOne({ _id: `order-${ymd}` }, { $max: { seq: maxSeq } }, { upsert: true });
+}
+
+const _seededDays = new Set();
 async function _nextOrderNumber(prefix) {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-
-  // Reset sequence khi sang ngày mới
-  if (ymd !== _orderSeqDate) {
-    _orderSeqDate = ymd;
-    _orderSeq = await Order.countDocuments({
-      createdAt: { $gte: new Date(d.getFullYear(), d.getMonth(), d.getDate()) },
-    });
+  const ymd = _todayYmd();
+  if (!_seededDays.has(ymd)) {
+    await _seedCounter(ymd);
+    _seededDays.add(ymd);
   }
-
-  _orderSeq++;
-  return `${prefix || 'ORD'}-${ymd}-${String(_orderSeq).padStart(3, '0')}`;
+  const { seq } = await Counter.findByIdAndUpdate(
+    `order-${ymd}`, { $inc: { seq: 1 } }, { upsert: true, new: true },
+  ).lean();
+  return `${prefix || 'ORD'}-${ymd}-${String(seq).padStart(3, '0')}`;
 }
 
 // ── Connect ────────────────────────────────────────────────
@@ -95,11 +123,13 @@ async function connectDB() {
   if (!uri) throw new Error('MONGODB_URI chưa được cấu hình trong .env');
   await mongoose.connect(uri);
 
-  // Khởi tạo sequence cho ngày hôm nay
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  _orderSeq = await Order.countDocuments({ createdAt: { $gte: today } });
-  _orderSeqDate = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+  // Tạo index ngay và báo rõ nếu dữ liệu cũ bị trùng (chạy scripts/check-orders.js để dọn)
+  try {
+    await Order.createIndexes();
+  } catch (err) {
+    console.error('[MongoDB] ⚠️ Không tạo được unique index cho Order — dữ liệu cũ đang bị trùng.');
+    console.error('           Chạy: node scripts/check-orders.js để kiểm tra và dọn.', err.message);
+  }
   console.log('[MongoDB] Đã kết nối Atlas ✓');
 }
 
@@ -141,30 +171,41 @@ async function saveComment({ tiktokUserId, username, displayName, comment, sessi
   return doc._id.toString();
 }
 
-// FIX: markPrinted — kiểm tra điều kiện printed: false để tránh double-increment
+// Đánh dấu bình luận đã chốt. Nguồn sự thật là Order (unique theo commentId),
+// cờ này chỉ để hiển thị — nên gọi SAU khi đã tạo đơn thành công
 async function markPrinted(commentId) {
-  // Atomic: chỉ update nếu comment CHƯA được print
-  const comment = await Comment.findOneAndUpdate(
-    { _id: commentId, printed: false },
-    { printed: true },
-    { new: true }
-  );
-
-  if (comment) {
-    // Chỉ tăng totalOrders khi thực sự thay đổi trạng thái
-    await Customer.findOneAndUpdate(
-      { tiktokUserId: comment.tiktokUserId },
-      { $inc: { totalOrders: 1 } }
-    );
-  }
-  return comment;
+  await Comment.updateOne({ _id: commentId }, { printed: true });
 }
 
 async function getCommentById(id) {
   return await Comment.findById(id).lean();
 }
 
+// Bình luận gần nhất của 1 phiên, kèm cờ "đã có đơn" lấy từ Order
+async function getRecentComments(sessionId, limit = 200) {
+  const query = sessionId ? { sessionId } : {};
+  const comments = await Comment.find(query).sort({ timestamp: -1 }).limit(limit).lean();
+  const ordered = await Order.find({ commentId: { $in: comments.map(c => c._id) } })
+    .select('commentId').lean();
+  const orderedIds = new Set(ordered.map(o => String(o.commentId)));
+  return comments.map(c => ({
+    id:           String(c._id),
+    tiktokUserId: c.tiktokUserId,
+    username:     c.username,
+    displayName:  c.displayName,
+    comment:      c.comment,
+    timestamp:    c.timestamp,
+    printed:      orderedIds.has(String(c._id)),
+  }));
+}
+
+async function getLatestSessionId() {
+  const s = await Session.findOne().sort({ startedAt: -1 }).select('_id').lean();
+  return s ? String(s._id) : null;
+}
+
 // ── Orders ────────────────────────────────────────────────
+// Ném lỗi E11000 (keyPattern.commentId) nếu bình luận này đã có đơn
 async function createOrder({ commentId, tiktokUserId, username, displayName, note, sessionId, prefix } = {}) {
   const orderNumber = await _nextOrderNumber(prefix);
   const order = await Order.create({
@@ -176,7 +217,23 @@ async function createOrder({ commentId, tiktokUserId, username, displayName, not
     note:        (note || '').slice(0, 1000),
     sessionId:   sessionId || null,
   });
+
+  // Mọi đơn (từ bình luận hay tạo tay) đều được tính vào số đơn của khách
+  await Customer.updateOne(
+    { tiktokUserId },
+    {
+      $inc:         { totalOrders: 1 },
+      $set:         { username, lastSeen: new Date() },
+      $setOnInsert: { displayName: displayName || username, firstSeen: new Date() },
+    },
+    { upsert: true },
+  );
+
   return order.toObject();
+}
+
+async function getOrderByCommentId(commentId) {
+  return await Order.findOne({ commentId }).lean();
 }
 
 async function getOrders({ status, search, page = 1, limit = 20 } = {}) {
@@ -204,58 +261,58 @@ async function getOrderById(id) {
   return await Order.findById(id).lean();
 }
 
-// FIX: updateOrderStatus — cập nhật totalSpent khi chuyển sang completed
-async function updateOrderStatus(id, status) {
-  const oldOrder = await Order.findById(id).lean();
-  if (!oldOrder) return null;
-
-  const updated = await Order.findByIdAndUpdate(
-    id, { status, updatedAt: new Date() }, { new: true }
+// Chỉ đổi trạng thái nếu đơn VẪN đang ở fromStatus (không bị thiết bị khác đổi trước).
+// Trả về null nếu đã bị đổi → server báo 409 cho người dùng tải lại.
+async function updateOrderStatus(id, fromStatus, toStatus) {
+  const updated = await Order.findOneAndUpdate(
+    { _id: id, status: fromStatus },
+    { status: toStatus, updatedAt: new Date() },
+    { new: true },
   ).lean();
   if (!updated) return null;
 
-  // Cập nhật totalSpent khi order hoàn thành lần đầu
-  if (status === 'completed' && oldOrder.status !== 'completed' && updated.amount > 0) {
-    await Customer.findOneAndUpdate(
-      { tiktokUserId: updated.tiktokUserId },
-      { $inc: { totalSpent: updated.amount } }
+  // Chỉ 1 request đổi được trạng thái → totalSpent / totalOrders không bị cộng/trừ 2 lần
+  if (toStatus === 'completed' && updated.amount > 0) {
+    await Customer.updateOne({ tiktokUserId: updated.tiktokUserId }, { $inc: { totalSpent: updated.amount } });
+  }
+  if (toStatus === 'cancelled') {
+    await Customer.updateOne(
+      { tiktokUserId: updated.tiktokUserId, totalOrders: { $gt: 0 } },
+      { $inc: { totalOrders: -1 } },
     );
   }
 
   return updated;
 }
 
-// FIX: updateOrderAmount — validate deposit không vượt quá amount
+// Đơn đã Hoàn thành / Đã huỷ thì khoá số tiền để doanh thu cũ không bị thay đổi
+const AMOUNT_LOCKED_STATUSES = ['completed', 'cancelled'];
+
 async function updateOrderAmount(id, { amount, depositAmount } = {}) {
-  const upd = { updatedAt: new Date() };
-
-  if (amount !== undefined)        upd.amount        = Math.max(0, Number(amount) || 0);
-  if (depositAmount !== undefined) upd.depositAmount = Math.max(0, Number(depositAmount) || 0);
-
-  // Validate: đặt cọc không được vượt quá tổng tiền
   const current = await Order.findById(id).lean();
   if (!current) return null;
+  if (AMOUNT_LOCKED_STATUSES.includes(current.status)) {
+    throw businessError('Đơn đã hoàn thành hoặc đã huỷ, không thể sửa số tiền', 409);
+  }
 
+  const upd = { updatedAt: new Date() };
+  if (amount !== undefined)        upd.amount        = amount;
+  if (depositAmount !== undefined) upd.depositAmount = depositAmount;
+
+  // Validate: đặt cọc không được vượt quá tổng tiền
   const finalAmount        = upd.amount        ?? current.amount;
   const finalDepositAmount = upd.depositAmount ?? current.depositAmount;
-
   if (finalAmount > 0 && finalDepositAmount > finalAmount) {
-    throw new Error(`Đặt cọc (${finalDepositAmount.toLocaleString('vi-VN')}đ) không thể vượt quá tổng tiền (${finalAmount.toLocaleString('vi-VN')}đ)`);
+    throw businessError(`Đặt cọc (${finalDepositAmount.toLocaleString('vi-VN')}đ) không thể vượt quá tổng tiền (${finalAmount.toLocaleString('vi-VN')}đ)`);
   }
 
-  const order = await Order.findByIdAndUpdate(id, { $set: upd }, { new: true }).lean();
-
-  // Nếu order đã completed, cập nhật totalSpent khi amount thay đổi
-  if (order && order.status === 'completed' && amount !== undefined) {
-    const delta = upd.amount - (current.amount || 0);
-    if (delta !== 0) {
-      await Customer.findOneAndUpdate(
-        { tiktokUserId: order.tiktokUserId },
-        { $inc: { totalSpent: delta } }
-      );
-    }
-  }
-
+  // Điều kiện status trong filter: nếu vừa bị chuyển Hoàn thành ở thiết bị khác thì không ghi
+  const order = await Order.findOneAndUpdate(
+    { _id: id, status: { $nin: AMOUNT_LOCKED_STATUSES } },
+    { $set: upd },
+    { new: true },
+  ).lean();
+  if (!order) throw businessError('Đơn vừa được cập nhật ở thiết bị khác, hãy tải lại', 409);
   return order;
 }
 
@@ -390,10 +447,11 @@ async function getSessionStats(sessionId) {
 module.exports = {
   connectDB,
   createSession, endSession,
-  saveComment, markPrinted, getCommentById,
+  saveComment, markPrinted, getCommentById, getRecentComments, getLatestSessionId,
   getAllCustomers, getCustomerByTiktokId, getCustomerComments, getCustomerOrders,
   updateCustomer, searchCustomers,
-  createOrder, getOrders, getOrderById, updateOrderStatus, updateOrderAmount,
+  createOrder, getOrderByCommentId, getOrders, getOrderById, updateOrderStatus, updateOrderAmount,
+  Order, Customer, Comment,
   getDashboardStats, getChartData,
   getSessionStats,
 };

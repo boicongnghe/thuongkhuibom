@@ -21,6 +21,40 @@ export function formatCurrency(amount) {
   return Number(amount).toLocaleString('vi-VN') + 'đ';
 }
 
+// Bỏ dấu tiếng Việt để so khớp: "Chốt" → "chot", "Đặt" → "dat".
+// NFD không tách được "đ/Đ" (là chữ riêng, không phải d + dấu) nên phải thay tay.
+export function normalizeVi(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase();
+}
+
+const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Bình luận có dấu hiệu chốt đơn không — dùng cho "Tự động in".
+ * @param {string} text  nội dung bình luận
+ * @param {object} opts  { keywords: 'chốt, lấy, mua', matchCode: true, matchPhone: true }
+ */
+export function looksLikeOrder(text, { keywords = 'chốt, lấy, mua, đặt', matchCode = true, matchPhone = true } = {}) {
+  const t = normalizeVi(text);
+  if (!t.trim()) return false;
+
+  // Từ khoá đứng riêng thành 1 từ: "chot" khớp "chốt ạ", không khớp "chotdon"
+  const words = String(keywords).split(',').map(k => normalizeVi(k).trim()).filter(Boolean);
+  if (words.some(w => new RegExp(`(^|[^a-z0-9])${escapeRegex(w)}($|[^a-z0-9])`).test(t))) return true;
+
+  // Mã SP: 1–3 chữ cái + 1–4 chữ số, vd A12, B05, SP123
+  if (matchCode && /(^|[^a-z0-9])[a-z]{1,3}\d{1,4}($|[^a-z0-9])/.test(t)) return true;
+
+  // SĐT VN: 0xxxxxxxxx hoặc 84/+84, cho phép cách bằng dấu cách / chấm / gạch
+  if (matchPhone && /(^|\D)(0|\+?84)[35789]\d{8}(\D|$)/.test(t.replace(/[\s.-]/g, ''))) return true;
+
+  return false;
+}
+
 export function getInitials(username) {
   return (username || '?').replace('@', '').slice(0, 2).toUpperCase();
 }

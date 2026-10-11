@@ -12,21 +12,22 @@ async function connect(username, handlers) {
   if (connection) await disconnect();
 
   const cleanUsername = username.replace('@', '').trim();
-  connection = new WebcastPushConnection(cleanUsername, {
+  const conn = new WebcastPushConnection(cleanUsername, {
     processInitialData: false,
     enableExtendedGiftInfo: false,
     enableWebsocketUpgrade: true,
     requestPollingIntervalMs: 2000,
   });
+  connection = conn;
 
   // Sự kiện kết nối thành công
-  connection.on('connected', (state) => {
+  conn.on('connected', (state) => {
     console.log(`[TikTok] Đã kết nối live: @${cleanUsername}`, state.roomId);
     handlers.onConnected?.({ username: cleanUsername, roomId: state.roomId });
   });
 
   // Nhận bình luận
-  connection.on('chat', (data) => {
+  conn.on('chat', (data) => {
     // FIX: bỏ qua comment rỗng hoặc chỉ có khoảng trắng
     const rawComment = (data.comment || '').trim();
     if (!rawComment) return;
@@ -42,28 +43,34 @@ async function connect(username, handlers) {
   });
 
   // Mất kết nối
-  connection.on('disconnected', () => {
+  conn.on('disconnected', () => {
     console.log('[TikTok] Mất kết nối');
+    // TikTok tự kết thúc live → isConnected() phải báo false
+    if (connection === conn) connection = null;
     handlers.onDisconnected?.();
   });
 
   // Lỗi
-  connection.on('error', (err) => {
+  conn.on('error', (err) => {
     console.error('[TikTok] Lỗi:', err);
     handlers.onError?.(err.message || 'Lỗi không xác định');
   });
 
   try {
-    const state = await connection.connect();
+    const state = await conn.connect();
     return { success: true, roomId: state.roomId };
   } catch (err) {
-    connection = null;
+    conn.removeAllListeners();
+    if (connection === conn) connection = null;
     throw new Error(err.message || 'Không thể kết nối TikTok Live');
   }
 }
 
 async function disconnect() {
   if (connection) {
+    // Gỡ handler TRƯỚC khi ngắt: nếu không, sự kiện 'disconnected' của kết nối cũ
+    // sẽ chạy sau khi phiên mới đã bắt đầu và đóng nhầm phiên mới
+    connection.removeAllListeners();
     try { connection.disconnect(); } catch (_) {}
     connection = null;
   }
