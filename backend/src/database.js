@@ -118,19 +118,34 @@ async function _nextOrderNumber(prefix) {
 }
 
 // ── Connect ────────────────────────────────────────────────
+// Gọi nhiều lần vẫn chỉ kết nối 1 lần — cần cho Vercel (mỗi request có thể gọi lại)
+let _connecting = null;
 async function connectDB() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error('MONGODB_URI chưa được cấu hình trong .env');
-  await mongoose.connect(uri);
+  if (mongoose.connection.readyState === 1) return;
+  if (_connecting) return _connecting;
 
-  // Tạo index ngay và báo rõ nếu dữ liệu cũ bị trùng (chạy scripts/check-orders.js để dọn)
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI chưa được cấu hình (.env trên máy hoặc Environment Variables trên Vercel)');
+
+  _connecting = (async () => {
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
+
+    // Tạo index ngay và báo rõ nếu dữ liệu cũ bị trùng (chạy scripts/check-orders.js để dọn)
+    try {
+      await Order.createIndexes();
+    } catch (err) {
+      console.error('[MongoDB] ⚠️ Không tạo được unique index cho Order — dữ liệu cũ đang bị trùng.');
+      console.error('           Chạy: node scripts/check-orders.js để kiểm tra và dọn.', err.message);
+    }
+    console.log('[MongoDB] Đã kết nối Atlas ✓');
+  })();
+
   try {
-    await Order.createIndexes();
+    await _connecting;
   } catch (err) {
-    console.error('[MongoDB] ⚠️ Không tạo được unique index cho Order — dữ liệu cũ đang bị trùng.');
-    console.error('           Chạy: node scripts/check-orders.js để kiểm tra và dọn.', err.message);
+    _connecting = null;   // lần sau thử kết nối lại
+    throw err;
   }
-  console.log('[MongoDB] Đã kết nối Atlas ✓');
 }
 
 // ── Sessions ──────────────────────────────────────────────

@@ -1,7 +1,12 @@
-const path = require('path');
-const fs   = require('fs');
+// Cài đặt lưu trong MongoDB (1 document duy nhất) để web trên Vercel và
+// backend trên máy tính dùng chung. File data/settings.json cũ chỉ dùng để
+// nhập vào DB một lần đầu tiên.
+const path     = require('path');
+const fs       = require('fs');
+const mongoose = require('mongoose');
 
-const FILE = path.join(__dirname, '../../data/settings.json');
+const LEGACY_FILE = path.join(__dirname, '../../data/settings.json');
+const DOC_ID = 'app';
 
 const DEFAULTS = {
   storeInfo: {
@@ -34,20 +39,41 @@ const DEFAULTS = {
   },
 };
 
-function load() {
+const settingSchema = new mongoose.Schema({
+  _id:       { type: String },
+  storeInfo: { type: Object, default: {} },
+  printer:   { type: Object, default: {} },
+  system:    { type: Object, default: {} },
+}, { minimize: false, timestamps: true });
+const Setting = mongoose.models.Setting || mongoose.model('Setting', settingSchema);
+
+function withDefaults(raw) {
+  return {
+    storeInfo: { ...DEFAULTS.storeInfo, ...(raw?.storeInfo || {}) },
+    printer:   { ...DEFAULTS.printer,   ...(raw?.printer   || {}) },
+    system:    { ...DEFAULTS.system,    ...(raw?.system    || {}) },
+  };
+}
+
+function readLegacyFile() {
   try {
-    if (fs.existsSync(FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      return {
-        storeInfo: { ...DEFAULTS.storeInfo, ...parsed.storeInfo },
-        printer:   { ...DEFAULTS.printer,   ...parsed.printer   },
-        system:    { ...DEFAULTS.system,    ...parsed.system    },
-      };
-    }
+    if (fs.existsSync(LEGACY_FILE)) return JSON.parse(fs.readFileSync(LEGACY_FILE, 'utf8'));
   } catch (e) {
-    console.error('[Settings] Lỗi đọc file:', e.message);
+    console.error('[Settings] Lỗi đọc file cũ:', e.message);
   }
-  return JSON.parse(JSON.stringify(DEFAULTS));
+  return null;
+}
+
+async function load() {
+  const doc = await Setting.findById(DOC_ID).lean();
+  if (doc) return withDefaults(doc);
+
+  // Lần đầu: nhập từ data/settings.json (nếu có) vào MongoDB
+  const legacy = readLegacyFile();
+  const initial = withDefaults(legacy);
+  await Setting.updateOne({ _id: DOC_ID }, { $setOnInsert: initial }, { upsert: true });
+  if (legacy) console.log('[Settings] Đã chuyển data/settings.json vào MongoDB');
+  return withDefaults(await Setting.findById(DOC_ID).lean());
 }
 
 function invalid(message) {
@@ -78,17 +104,16 @@ function pickValid(section, input) {
   return out;
 }
 
-function save(patch) {
-  const current = load();
-  const merged  = {
-    storeInfo: { ...current.storeInfo, ...pickValid('storeInfo', patch?.storeInfo) },
-    printer:   { ...current.printer,   ...pickValid('printer',   patch?.printer)   },
-    system:    { ...current.system,    ...pickValid('system',    patch?.system)    },
-  };
-  const dir = path.dirname(FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(merged, null, 2), 'utf8');
-  return merged;
+async function save(patch) {
+  await load();  // đảm bảo document đã tồn tại
+  const update = {};
+  for (const section of Object.keys(DEFAULTS)) {
+    for (const [k, v] of Object.entries(pickValid(section, patch?.[section]))) {
+      update[`${section}.${k}`] = v;   // chỉ ghi đè đúng trường được gửi lên
+    }
+  }
+  if (Object.keys(update).length) await Setting.updateOne({ _id: DOC_ID }, { $set: update });
+  return withDefaults(await Setting.findById(DOC_ID).lean());
 }
 
-module.exports = { load, save };
+module.exports = { load, save, DEFAULTS };

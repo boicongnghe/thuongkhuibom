@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import socket from '../socket';
+import socket, { realtimeEnabled } from '../socket';
 import { api } from '../api';
 import { formatTime, getInitials, looksLikeOrder } from '../utils';
 import { useApp } from '../context/AppContext';
@@ -74,7 +74,8 @@ export default function Livestream() {
         setPrinterInfo({ text: `${d.printerName} · Sẵn sàng`, ok: true });
       } else {
         const st = d.status || '';
-        const msg = st === 'NOT_FOUND' ? 'Không tìm thấy máy in'
+        const msg = st === 'NOT_LOCAL' ? 'Máy in: chỉ trên máy tính'
+          : st === 'NOT_FOUND' ? 'Không tìm thấy máy in'
           : st.startsWith('OFFLINE') ? `${d.printerName} · Chưa kết nối`
           : `${d.printerName} · Lỗi`;
         setPrinterInfo({ text: msg, ok: false });
@@ -159,6 +160,10 @@ export default function Livestream() {
   }, [settings]);
 
   function connect() {
+    if (!realtimeEnabled) {
+      showToast('Kết nối TikTok Live chỉ chạy trên máy tính có backend (npm run dev)', 'error', 5000);
+      return;
+    }
     const u = inputUsername.trim();
     if (!u) { showToast('Vui lòng nhập username TikTok', 'error'); return; }
     setConnecting(true);
@@ -217,6 +222,12 @@ export default function Livestream() {
           </div>
         </div>
       </header>
+
+      {!realtimeEnabled && (
+        <div className="web-only-notice" role="status">
+          Bản web chỉ để xem và quản lý đơn. Nhận bình luận TikTok Live và in phiếu cần mở app trên máy tính có cắm máy in.
+        </div>
+      )}
 
       {/* Stats bar */}
       <div className="stats-bar">

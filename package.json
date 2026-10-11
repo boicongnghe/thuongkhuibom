@@ -37,17 +37,13 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
-    "escpos": "^3.0.0-alpha.6",
-    "escpos-usb": "^3.0.0-alpha.4",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.23.1",
-    "printer": "^0.4.0",
     "socket.io": "^4.8.3",
-    "tiktok-live-connector": "^2.1.1-beta1",
-    "usb": "^1.9.2"
+    "tiktok-live-connector": "^2.1.1-beta1"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
