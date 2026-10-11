@@ -23,7 +23,9 @@ function escText(str)       {
   const buf = [];
   for (let i = 0; i < str.length; i++) {
     const code = str.charCodeAt(i);
-    buf.push(code < 128 ? code : 0x3F); // non-ASCII → '?'
+    // Chỉ ký tự in được (0x20–0x7E). Ký tự điều khiển như ESC/GS trong bình luận
+    // có thể ra lệnh cho máy in (cắt giấy, mở ngăn kéo) → đổi thành '?'
+    buf.push(code >= 0x20 && code < 0x7F ? code : 0x3F);
   }
   buf.push(0x0A); // newline
   return buf;

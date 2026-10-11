@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import socket from '../socket';
 import { api } from '../api';
-import { formatTime, getInitials } from '../utils';
+import { formatTime, getInitials, looksLikeOrder } from '../utils';
 import { useApp } from '../context/AppContext';
 
 export default function Livestream() {
@@ -24,12 +24,15 @@ export default function Livestream() {
 
   const [printerInfo, setPrinterInfo]       = useState({ text: 'Kiểm tra...', ok: false });
   const [printingIds, setPrintingIds]       = useState(new Set());
+  // Bản sao dạng ref: handler socket (đăng ký 1 lần) luôn đọc được giá trị mới nhất
+  const printingRef = useRef(new Set());
 
   const feedRef = useRef(null);
 
   // ── Load initial data ──
   useEffect(() => {
     loadCustomers();
+    loadRecentComments();
     checkPrinter();
     const t = setInterval(checkPrinter, 30000);
     return () => clearInterval(t);
@@ -41,6 +44,27 @@ export default function Livestream() {
       setCustomers(list);
       setCustomerCount(list.length);
     } catch {}
+  }
+
+  // Tải lại trang / mở thêm thiết bị giữa buổi live: lấy lại bình luận đã lưu trong DB
+  async function loadRecentComments() {
+    try {
+      const { comments: list } = await api.getRecentComments(200);
+      setComments(prev => {
+        const known = new Set(prev.map(c => c.id));
+        return [...prev, ...list.filter(c => !known.has(c.id))].slice(0, 200);
+      });
+      setPrintedIds(prev => new Set([...prev, ...list.filter(c => c.printed).map(c => c.id)]));
+      setCommentCount(c => Math.max(c, list.length));
+      setOrderCount(c => Math.max(c, list.filter(c2 => c2.printed).length));
+    } catch {}
+  }
+
+  function setPrinting(commentId, on) {
+    const next = new Set(printingRef.current);
+    if (on) next.add(commentId); else next.delete(commentId);
+    printingRef.current = next;
+    setPrintingIds(next);
   }
 
   async function checkPrinter() {
@@ -87,8 +111,13 @@ export default function Livestream() {
         const next = [data, ...prev].slice(0, 200);
         return next;
       });
-      // Auto-print
-      if (settings?.printer?.autoPrint) {
+      // Tự động in: CHỈ bình luận có dấu hiệu chốt (từ khoá / mã SP / SĐT trong Cài đặt máy in)
+      const p = settings?.printer;
+      if (p?.autoPrint && looksLikeOrder(data.comment, {
+        keywords:   p.orderKeywords,
+        matchCode:  p.autoPrintMatchCode !== false,
+        matchPhone: p.autoPrintMatchPhone !== false,
+      })) {
         setTimeout(() => printComment(data.id), 400);
       }
     }
@@ -100,13 +129,16 @@ export default function Livestream() {
       loadCustomers();
     }
 
-    function onPrinterStatus({ status, message }) {
-      if (status === 'ok') {
-        showToast(message, 'success');
-      } else {
-        setPrintingIds(new Set());
-        showToast(message, 'error', 4000);
-      }
+    function onPrinterStatus({ status, message, commentId }) {
+      if (commentId) setPrinting(commentId, false);
+      else { printingRef.current = new Set(); setPrintingIds(new Set()); }
+      if (status === 'ok') showToast(message, 'success');
+      else showToast(message, 'error', 5000);
+    }
+
+    // Bình luận đã có đơn từ trước (vd chốt ở thiết bị khác) → hiện nút "In lại"
+    function onOrderExists({ commentId }) {
+      setPrintedIds(prev => new Set([...prev, commentId]));
     }
 
     socket.on('tiktok:status',  onStatus);
@@ -114,6 +146,7 @@ export default function Livestream() {
     socket.on('comment:new',    onComment);
     socket.on('order:saved',    onOrderSaved);
     socket.on('printer:status', onPrinterStatus);
+    socket.on('order:exists',   onOrderExists);
 
     return () => {
       socket.off('tiktok:status',  onStatus);
@@ -121,6 +154,7 @@ export default function Livestream() {
       socket.off('comment:new',    onComment);
       socket.off('order:saved',    onOrderSaved);
       socket.off('printer:status', onPrinterStatus);
+      socket.off('order:exists',   onOrderExists);
     };
   }, [settings]);
 
@@ -135,10 +169,15 @@ export default function Livestream() {
     socket.emit('tiktok:disconnect');
   }
 
-  function printComment(commentId) {
-    if (printingIds.has(commentId)) return;
-    setPrintingIds(prev => new Set([...prev, commentId]));
-    socket.emit('print:comment', { commentId });
+  // reprint = true: chỉ in lại phiếu của đơn đã có, không tạo đơn mới
+  function printComment(commentId, reprint = false) {
+    if (printingRef.current.has(commentId)) return;   // chặn bấm 2 lần
+    if (!socket.connected) {
+      showToast('Mất kết nối máy chủ, đang thử kết nối lại...', 'error');
+      return;
+    }
+    setPrinting(commentId, true);
+    socket.emit('print:comment', { commentId, reprint });
   }
 
   return (
@@ -232,7 +271,16 @@ export default function Livestream() {
                       <div className="comment-text">{c.comment}</div>
                       <div className="comment-actions">
                         {isPrinted
-                          ? <span className="printed-badge">✓ Đã chốt đơn</span>
+                          ? <>
+                              <span className="printed-badge">✓ Đã chốt đơn</span>
+                              <button
+                                className="btn-reprint"
+                                disabled={isPrinting}
+                                onClick={() => printComment(c.id, true)}
+                              >
+                                {isPrinting ? 'Đang in...' : 'In lại'}
+                              </button>
+                            </>
                           : <button
                               className={`btn-print${isPrinting ? ' printing' : ''}`}
                               disabled={isPrinting}

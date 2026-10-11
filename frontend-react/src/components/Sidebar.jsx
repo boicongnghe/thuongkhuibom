@@ -53,7 +53,7 @@ const NAV_SECTIONS = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ user, onLogout }) {
   return (
     <nav className="sidebar">
       <div className="sidebar-brand">
@@ -82,10 +82,20 @@ export default function Sidebar() {
             </div>
           </div>
         ))}
+        <div className="sidebar-section">
+          <div className="sidebar-section-items">
+            <button type="button" className="nav-item" onClick={onLogout} title={user ? `Đăng xuất @${user.username}` : 'Đăng xuất'}>
+              <span className="nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              </span>
+              <span className="nav-label">Đăng xuất</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="sidebar-footer">
-        <span>Chốt Đơn Live</span>
+        <span>{user ? `@${user.username}` : 'Chốt Đơn Live'}</span>
         <span>v1.0</span>
       </div>
     </nav>

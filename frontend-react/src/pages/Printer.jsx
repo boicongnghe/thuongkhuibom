@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
+import { looksLikeOrder } from '../utils';
 
 export default function Printer() {
   const { settings, saveSettings, showToast } = useApp();
 
   const [connType, setConnType]       = useState('ip');
   const [autoPrint, setAutoPrint]     = useState(false);
+  const [keywords, setKeywords]       = useState('');
+  const [matchCode, setMatchCode]     = useState(true);
+  const [matchPhone, setMatchPhone]   = useState(true);
+  const [savingRules, setSavingRules] = useState(false);
+  const [testText, setTestText]       = useState('');
   const [ip, setIp]                   = useState('');
   const [port, setPort]               = useState(9100);
   const [btDevice, setBtDevice]       = useState(null);
@@ -18,6 +24,9 @@ export default function Printer() {
     if (!settings) return;
     setConnType(settings.printer?.connectionType || 'ip');
     setAutoPrint(!!settings.printer?.autoPrint);
+    setKeywords(settings.printer?.orderKeywords ?? 'chốt, lấy, mua, đặt');
+    setMatchCode(settings.printer?.autoPrintMatchCode !== false);
+    setMatchPhone(settings.printer?.autoPrintMatchPhone !== false);
     setIp(settings.printer?.ip || '');
     setPort(settings.printer?.port || 9100);
     if (settings.printer?.bluetoothDeviceId) {
@@ -49,6 +58,29 @@ export default function Printer() {
       showToast(`Lỗi: ${err.message}`, 'error');
     }
   }
+
+  async function saveAutoPrintRules() {
+    if (savingRules) return;
+    const cleaned = keywords.split(',').map(k => k.trim()).filter(Boolean).join(', ');
+    if (!cleaned && !matchCode && !matchPhone) {
+      showToast('Cần ít nhất 1 từ khoá hoặc bật nhận diện mã SP / SĐT', 'error');
+      return;
+    }
+    setSavingRules(true);
+    try {
+      await saveSettings({ printer: { orderKeywords: cleaned, autoPrintMatchCode: matchCode, autoPrintMatchPhone: matchPhone } });
+      setKeywords(cleaned);
+      showToast('Đã lưu quy tắc tự động in', 'success');
+    } catch (err) {
+      showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setSavingRules(false);
+    }
+  }
+
+  const testResult = testText.trim()
+    ? looksLikeOrder(testText, { keywords, matchCode, matchPhone })
+    : null;
 
   async function saveIPConfig() {
     const ipRe = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
@@ -160,13 +192,54 @@ export default function Printer() {
             <div className="setting-row">
               <div className="setting-info">
                 <span className="setting-label">Tự động in khi có đơn mới</span>
-                <span className="setting-desc">In ngay mỗi bình luận nhận được từ TikTok Live</span>
+                <span className="setting-desc">Tự chốt và in bình luận khớp quy tắc bên dưới (bình luận thường không bị in)</span>
               </div>
               <label className="toggle-switch">
                 <input type="checkbox" checked={autoPrint} onChange={e => handleAutoPrint(e.target.checked)} />
                 <span className="toggle-slider" />
               </label>
             </div>
+
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label" htmlFor="order-keywords">Từ khoá chốt đơn (cách nhau bằng dấu phẩy)</label>
+              <input id="order-keywords" type="text" className="form-input" maxLength={500}
+                placeholder="chốt, lấy, mua, đặt"
+                value={keywords} onChange={e => setKeywords(e.target.value)} />
+              <p className="form-hint">Không phân biệt hoa thường và dấu: "chốt" khớp cả "Chốt", "chot", "CHOT".</p>
+            </div>
+            <div className="setting-row">
+              <div className="setting-info">
+                <span className="setting-label">Nhận diện mã sản phẩm</span>
+                <span className="setting-desc">Bình luận có mã kiểu A12, B05, SP123</span>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={matchCode} onChange={e => setMatchCode(e.target.checked)} />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div className="setting-row">
+              <div className="setting-info">
+                <span className="setting-label">Nhận diện số điện thoại</span>
+                <span className="setting-desc">Bình luận có SĐT Việt Nam (0912 345 678, +84912345678…)</span>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={matchPhone} onChange={e => setMatchPhone(e.target.checked)} />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="rule-test">Thử một bình luận</label>
+              <input id="rule-test" type="text" className="form-input" placeholder='vd: "Đặt A12 size M nha shop"'
+                value={testText} onChange={e => setTestText(e.target.value)} />
+              {testResult !== null && (
+                <p className="form-hint" style={{ color: testResult ? 'var(--green)' : 'var(--text-muted)', fontWeight: 600 }}>
+                  {testResult ? '✓ Sẽ tự động in' : '✗ Không tự in (bình luận thường)'}
+                </p>
+              )}
+            </div>
+            <button className="btn-save-config" onClick={saveAutoPrintRules} disabled={savingRules}>
+              {savingRules ? 'Đang lưu...' : 'Lưu quy tắc tự động in'}
+            </button>
 
             <div className="settings-divider" />
 

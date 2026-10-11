@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { authApi } from '../api/auth';
 
 const TABS = [
   { key: 'store',  label: '🏪 Thông tin cửa hàng' },
@@ -74,6 +75,20 @@ export default function Settings() {
     } catch (err) {
       setAutoDeposit(!v);
       showToast(`Lỗi: ${err.message}`, 'error');
+    }
+  }
+
+  const [loggingOutAll, setLoggingOutAll] = useState(false);
+  async function logoutAllDevices() {
+    if (loggingOutAll) return;
+    if (!window.confirm('Đăng xuất khỏi TẤT CẢ thiết bị (máy tính, điện thoại...)? Bạn sẽ phải đăng nhập lại.')) return;
+    setLoggingOutAll(true);
+    try {
+      await authApi.logoutAll();
+      window.dispatchEvent(new Event('auth:expired'));   // App quay về trang đăng nhập
+    } catch (err) {
+      showToast(`Lỗi: ${err.message}`, 'error');
+      setLoggingOutAll(false);
     }
   }
 
@@ -214,6 +229,19 @@ export default function Settings() {
                 <div className="form-actions" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
                   <button className="btn-save-store" onClick={saveSystem} disabled={savingSystem}>
                     {savingSystem ? 'Đang lưu...' : 'Lưu cài đặt hệ thống'}
+                  </button>
+                </div>
+
+                <div className="settings-divider" />
+
+                <div className="setting-section-label">Bảo mật</div>
+                <div className="setting-row">
+                  <div className="setting-info">
+                    <span className="setting-label">Đăng xuất mọi thiết bị</span>
+                    <span className="setting-desc">Dùng khi mất điện thoại hoặc nghi bị lộ mật khẩu. Mọi phiên đăng nhập đang mở đều hết hiệu lực.</span>
+                  </div>
+                  <button type="button" className="btn-cancel" onClick={logoutAllDevices} disabled={loggingOutAll}>
+                    {loggingOutAll ? 'Đang xử lý...' : 'Đăng xuất tất cả'}
                   </button>
                 </div>
 

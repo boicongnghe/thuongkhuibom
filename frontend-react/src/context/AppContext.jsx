@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { api } from '../api';
+import socket from '../socket';
 
 const AppContext = createContext(null);
 
@@ -13,6 +14,13 @@ export function AppProvider({ children }) {
   // Load settings on mount
   useEffect(() => {
     api.getSettings().then(s => setSettings(s)).catch(console.error);
+  }, []);
+
+  // Cài đặt đổi ở thiết bị khác (vd bật tự động in trên điện thoại) → cập nhật ngay
+  useEffect(() => {
+    const onSettings = (s) => setSettings(s);
+    socket.on('settings:updated', onSettings);
+    return () => socket.off('settings:updated', onSettings);
   }, []);
 
   const showToast = useCallback((msg, type = 'info', duration = 2800) => {

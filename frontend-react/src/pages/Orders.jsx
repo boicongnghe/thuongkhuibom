@@ -9,6 +9,8 @@ import { useApp } from '../context/AppContext';
 import socket from '../socket';
 
 const STATUS_FILTERS = ['all', 'pending', 'deposit', 'confirmed', 'shipping', 'completed', 'cancelled'];
+// Giống backend: đơn Hoàn thành / Đã huỷ không sửa được số tiền
+const AMOUNT_LOCKED = ['completed', 'cancelled'];
 const STATUS_FILTER_LABELS = {
   all: 'Tất cả', pending: 'Chờ xử lý', deposit: 'Đặt cọc',
   confirmed: 'Xác nhận', shipping: 'Đang giao', completed: 'Hoàn thành', cancelled: 'Đã hủy',
@@ -32,6 +34,9 @@ export default function Orders() {
   // Create modal
   const [createModal, setCreateModal]     = useState(false);
   const [createForm, setCreateForm]       = useState({ username: '', displayName: '', tiktokUserId: '', note: '' });
+  const [creating, setCreating]           = useState(false);
+  const [savingAmount, setSavingAmount]   = useState(false);
+  const [busyOrderId, setBusyOrderId]     = useState(null);
 
   async function load(p = page, s = status, q = search) {
     try {
@@ -49,9 +54,11 @@ export default function Orders() {
     function onStatusChanged() { load(); }
     socket.on('order:status_changed', onStatusChanged);
     socket.on('order:saved', onStatusChanged);
+    socket.on('order:updated', onStatusChanged);   // sửa tiền / tạo đơn ở thiết bị khác
     return () => {
       socket.off('order:status_changed', onStatusChanged);
       socket.off('order:saved', onStatusChanged);
+      socket.off('order:updated', onStatusChanged);
     };
   }, [page, status, search]);
 
@@ -65,16 +72,24 @@ export default function Orders() {
   }
 
   async function changeStatus(orderId, newStatus) {
+    if (busyOrderId) return;               // chặn bấm liên tục
+    setBusyOrderId(orderId);
     try {
       await api.updateOrderStatus(orderId, newStatus);
       showToast(`Đã cập nhật: ${STATUS_LABELS[newStatus]?.label}`, 'success');
-      load();
     } catch (err) {
       showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setBusyOrderId(null);
+      load();                              // luôn tải lại để thấy trạng thái thật
     }
   }
 
   function openAmount(o) {
+    if (AMOUNT_LOCKED.includes(o.status)) {
+      showToast('Đơn đã hoàn thành hoặc đã huỷ, không thể sửa số tiền', 'info');
+      return;
+    }
     setAmountModal({ orderId: o._id });
     setAmountVal(o.amount || 0);
     setDepositVal(o.depositAmount || 0);
@@ -82,6 +97,8 @@ export default function Orders() {
 
   async function saveAmount() {
     if (depositError) { showToast('Đặt cọc vượt quá tổng tiền', 'error'); return; }
+    if (savingAmount) return;
+    setSavingAmount(true);
     try {
       await api.updateOrderAmount(amountModal.orderId, { amount: amountVal, depositAmount: depositVal });
       showToast('Đã cập nhật số tiền', 'success');
@@ -89,12 +106,16 @@ export default function Orders() {
       load();
     } catch (err) {
       showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setSavingAmount(false);
     }
   }
 
   async function submitCreate() {
     const u = createForm.username.trim().replace('@', '');
     if (!u) { showToast('Vui lòng nhập username', 'error'); return; }
+    if (creating) return;                  // chặn bấm 2 lần → 2 đơn
+    setCreating(true);
     try {
       const order = await api.createOrder({
         tiktokUserId: createForm.tiktokUserId.trim() || u,
@@ -108,6 +129,8 @@ export default function Orders() {
       load(1);
     } catch (err) {
       showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -173,7 +196,8 @@ export default function Orders() {
                       </td>
                       <td className="note-cell">{(o.note || '').slice(0, 50)}{(o.note || '').length > 50 ? '...' : ''}</td>
                       <td>
-                        <button className="amount-btn" onClick={() => openAmount(o)}>
+                        <button className="amount-btn" onClick={() => openAmount(o)}
+                          title={AMOUNT_LOCKED.includes(o.status) ? 'Đã khoá số tiền' : 'Sửa số tiền'}>
                           {o.amount ? formatCurrency(o.amount) : <span style={{ color: 'var(--text-dim)' }}>—</span>}
                         </button>
                       </td>
@@ -183,7 +207,8 @@ export default function Orders() {
                       <td className="actions-cell">
                         {nexts.length
                           ? nexts.map(s => (
-                              <button key={s} className="btn-status-change" onClick={() => changeStatus(o._id, s)}>
+                              <button key={s} className="btn-status-change" disabled={busyOrderId === o._id}
+                                onClick={() => changeStatus(o._id, s)}>
                                 {STATUS_LABELS[s]?.label}
                               </button>
                             ))
@@ -204,20 +229,22 @@ export default function Orders() {
         <div className="modal-form">
           <div className="form-group">
             <label className="form-label">Số tiền đơn hàng (đ)</label>
-            <input type="number" className="form-input" value={amountVal} min="0" step="1000"
-              onChange={e => setAmountVal(parseFloat(e.target.value) || 0)} />
+            <input type="number" className="form-input" value={amountVal} min="0" step="1000" inputMode="numeric"
+              onChange={e => setAmountVal(Math.max(0, Math.round(Number(e.target.value) || 0)))} />
           </div>
           <div className="form-group">
             <label className="form-label">Số tiền đặt cọc (đ)</label>
-            <input type="number" className="form-input" value={depositVal} min="0" step="1000"
-              onChange={e => setDepositVal(parseFloat(e.target.value) || 0)} />
+            <input type="number" className="form-input" value={depositVal} min="0" step="1000" inputMode="numeric"
+              onChange={e => setDepositVal(Math.max(0, Math.round(Number(e.target.value) || 0)))} />
             {depositError && <span className="form-hint" style={{ color: 'var(--accent)' }}>
               ⚠️ Đặt cọc vượt quá tổng tiền ({amountVal.toLocaleString('vi-VN')}đ)
             </span>}
           </div>
           <div className="modal-actions">
             <button className="btn-cancel" onClick={() => setAmountModal(null)}>Hủy</button>
-            <button className="btn-save-store" onClick={saveAmount} disabled={depositError}>Lưu</button>
+            <button className="btn-save-store" onClick={saveAmount} disabled={depositError || savingAmount}>
+              {savingAmount ? 'Đang lưu...' : 'Lưu'}
+            </button>
           </div>
         </div>
       </Modal>
@@ -245,7 +272,9 @@ export default function Orders() {
           </div>
           <div className="modal-actions">
             <button className="btn-cancel" onClick={() => setCreateModal(false)}>Hủy</button>
-            <button className="btn-save-store" onClick={submitCreate}>Tạo đơn</button>
+            <button className="btn-save-store" onClick={submitCreate} disabled={creating}>
+              {creating ? 'Đang tạo...' : 'Tạo đơn'}
+            </button>
           </div>
         </div>
       </Modal>

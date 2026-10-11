@@ -3,20 +3,60 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const cors         = require('cors');
+const cookieParser = require('cookie-parser');
+const helmet       = require('helmet');
 
 const tiktok   = require('./src/tiktok');
 const printer  = require('./src/printer');
 const db       = require('./src/database');
 const settings = require('./src/settings');
+const authRoutes = require('./src/authRoutes');
+const { getSecret, requireAuth, requireAppHeader, socketAuth } = require('./src/authMiddleware');
+
+// Dừng ngay nếu thiếu JWT_SECRET, tránh chạy với cấu hình không an toàn
+try {
+  getSecret();
+} catch (err) {
+  console.error('[Auth]', err.message);
+  process.exit(1);
+}
+
+// Chỉ cho phép các domain frontend liệt kê trong CORS_ORIGINS (cách nhau bởi dấu phẩy)
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
 
 const app        = express();
 const httpServer = createServer(app);
-const io         = new Server(httpServer, { cors: { origin: '*' } });
+const io         = new Server(httpServer, {
+  cors: { origin: allowedOrigins.length ? allowedOrigins : false, credentials: true },
+});
+
+app.set('io', io);  // cho các route (vd logout-all) dùng Socket.io
 
 const PORT = process.env.PORT || 3001;
 
+// Chạy sau proxy (Cloudflare Tunnel, Vercel rewrite...) để lấy đúng IP người dùng
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isNaN(hops) ? process.env.TRUST_PROXY : hops);
+}
+
 // ── Middleware ────────────────────────────────────────────
+// Header bảo mật mặc định (CSP mặc định của helmet đã cho phép Google Fonts và style inline)
+app.use(helmet());
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)),
+  credentials: true,
+}));
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
+
+// ── Auth: /api/auth tự do, mọi /api khác phải đăng nhập ───
+app.use('/api', requireAppHeader);
+app.use('/api/auth', authRoutes);
+app.use('/api', requireAuth);
+io.use(socketAuth);
 
 // Serve React build (production) or old frontend (fallback)
 const reactDist = path.join(__dirname, '../frontend-react-dist');
@@ -44,6 +84,22 @@ function isValidObjectId(id) {
   return OBJECTID_RE.test(id);
 }
 
+// ── Error helper ──────────────────────────────────────────
+// Lỗi nghiệp vụ (err.expose) hiện nguyên văn; lỗi khác chỉ ghi log, không lộ chi tiết nội bộ
+function sendError(res, err, context) {
+  if (err?.expose) return res.status(err.status || 400).json({ error: err.message });
+  console.error(`[API Error] ${context}:`, err);
+  res.status(500).json({ error: 'Lỗi máy chủ, vui lòng thử lại' });
+}
+
+// Số tiền VND: số nguyên, 0 → 1 tỷ
+const MAX_AMOUNT = 1_000_000_000;
+function parseAmount(val) {
+  if (val === undefined) return undefined;
+  const n = typeof val === 'string' && val.trim() !== '' ? Number(val) : val;
+  return Number.isSafeInteger(n) && n >= 0 && n <= MAX_AMOUNT ? n : NaN;
+}
+
 // ── Order status machine ──────────────────────────────────
 const VALID_STATUSES = new Set(['pending', 'deposit', 'confirmed', 'shipping', 'completed', 'cancelled']);
 const STATUS_TRANSITIONS = {
@@ -64,7 +120,7 @@ app.get('/api/dashboard', async (req, res) => {
   try {
     res.json(await db.getDashboardStats());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'dashboard');
   }
 });
 
@@ -75,7 +131,19 @@ app.get('/api/stats/chart', async (req, res) => {
     const count  = Math.min(Math.max(1, parseInt(req.query.count) || 7), 365);
     res.json(await db.getChartData(period, count));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'stats/chart');
+  }
+});
+
+// ── Comments ──────────────────────────────────────────────
+// Bình luận gần nhất của phiên đang live (hoặc phiên gần nhất) — dùng khi tải lại trang
+app.get('/api/comments/recent', async (req, res) => {
+  try {
+    const limit     = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200));
+    const sessionId = currentSessionId || await db.getLatestSessionId();
+    res.json({ sessionId, live: tiktok.isConnected(), comments: await db.getRecentComments(sessionId, limit) });
+  } catch (err) {
+    sendError(res, err, 'comments/recent');
   }
 });
 
@@ -89,7 +157,7 @@ app.get('/api/orders', async (req, res) => {
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     res.json(await db.getOrders({ status, search, page, limit }));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'orders');
   }
 });
 
@@ -110,9 +178,10 @@ app.post('/api/orders', async (req, res) => {
       tiktokUserId, username, displayName, note,
       prefix: sanitizeStr(s.system?.orderPrefix, 10) || 'ORD',
     });
+    io.emit('order:updated', { orderId: String(ord._id) });
     res.status(201).json(ord);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'create order');
   }
 });
 
@@ -138,11 +207,15 @@ app.put('/api/orders/:id/status', async (req, res) => {
       });
     }
 
-    const order = await db.updateOrderStatus(req.params.id, newStatus);
+    // Chỉ ghi nếu trạng thái vẫn là current.status — chống 2 thiết bị bấm cùng lúc
+    const order = await db.updateOrderStatus(req.params.id, current.status, newStatus);
+    if (!order) {
+      return res.status(409).json({ error: 'Đơn vừa được cập nhật ở thiết bị khác, hãy tải lại' });
+    }
     io.emit('order:status_changed', { orderId: req.params.id, status: newStatus });
     res.json(order);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'order status');
   }
 });
 
@@ -152,23 +225,24 @@ app.put('/api/orders/:id/amount', async (req, res) => {
       return res.status(400).json({ error: 'ID đơn hàng không hợp lệ' });
     }
 
-    const amount        = req.body.amount        !== undefined ? Number(req.body.amount)        : undefined;
-    const depositAmount = req.body.depositAmount !== undefined ? Number(req.body.depositAmount) : undefined;
+    const amount        = parseAmount(req.body.amount);
+    const depositAmount = parseAmount(req.body.depositAmount);
 
-    // Validate numbers
-    if (amount !== undefined && (isNaN(amount) || amount < 0)) {
-      return res.status(400).json({ error: 'Số tiền không hợp lệ' });
+    // Validate numbers: số nguyên, không âm, không vô cực
+    if (Number.isNaN(amount)) {
+      return res.status(400).json({ error: 'Số tiền phải là số nguyên từ 0 đến 1 tỷ' });
     }
-    if (depositAmount !== undefined && (isNaN(depositAmount) || depositAmount < 0)) {
-      return res.status(400).json({ error: 'Số tiền đặt cọc không hợp lệ' });
+    if (Number.isNaN(depositAmount)) {
+      return res.status(400).json({ error: 'Số tiền đặt cọc phải là số nguyên từ 0 đến 1 tỷ' });
     }
 
     const order = await db.updateOrderAmount(req.params.id, { amount, depositAmount });
     if (!order) return res.status(404).json({ error: 'Không tìm thấy đơn hàng' });
+    io.emit('order:updated', { orderId: req.params.id });
     res.json(order);
   } catch (err) {
-    // Bao gồm lỗi "đặt cọc vượt quá tổng tiền"
-    res.status(400).json({ error: err.message });
+    // Lỗi nghiệp vụ như "đặt cọc vượt quá tổng tiền" có err.expose
+    sendError(res, err, 'order amount');
   }
 });
 
@@ -179,7 +253,7 @@ app.get('/api/customers/search', async (req, res) => {
     const q = sanitizeStr(req.query.q, 100);
     res.json(await db.searchCustomers(q));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'customers/search');
   }
 });
 
@@ -187,7 +261,7 @@ app.get('/api/customers', async (req, res) => {
   try {
     res.json(await db.getAllCustomers());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'customers');
   }
 });
 
@@ -197,7 +271,7 @@ app.get('/api/customers/:userId', async (req, res) => {
     if (!customer) return res.status(404).json({ error: 'Không tìm thấy khách hàng' });
     res.json(customer);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'customer');
   }
 });
 
@@ -205,7 +279,7 @@ app.get('/api/customers/:userId/comments', async (req, res) => {
   try {
     res.json(await db.getCustomerComments(sanitizeStr(req.params.userId, 100)));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'customer comments');
   }
 });
 
@@ -213,7 +287,7 @@ app.get('/api/customers/:userId/orders', async (req, res) => {
   try {
     res.json(await db.getCustomerOrders(sanitizeStr(req.params.userId, 100)));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'customer orders');
   }
 });
 
@@ -227,9 +301,10 @@ app.put('/api/customers/:userId', async (req, res) => {
       displayName: sanitizeStr(req.body.displayName, 200),
     });
     if (!customer) return res.status(404).json({ error: 'Không tìm thấy khách hàng' });
+    io.emit('customer:updated', { tiktokUserId: userId });
     res.json(customer);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'update customer');
   }
 });
 
@@ -266,7 +341,8 @@ app.post('/api/printer/test-ip', (req, res) => {
     if (!done) { done = true; res.json({ ok: true, message: 'In thử thành công!' }); }
   });
   client.on('error', (err) => {
-    if (!done) { done = true; res.status(500).json({ error: err.message }); }
+    // Lỗi mạng (ECONNREFUSED, EHOSTUNREACH...) có ích cho người dùng tự kiểm tra máy in
+    if (!done) { done = true; res.status(500).json({ error: `Không kết nối được máy in: ${err.code || err.message}` }); }
   });
   client.on('timeout', () => {
     client.destroy();
@@ -281,9 +357,12 @@ app.get('/api/settings', (req, res) => {
 
 app.put('/api/settings', (req, res) => {
   try {
-    res.json(settings.save(req.body));
+    const saved = settings.save(req.body);
+    // Thiết bị khác (web/điện thoại) cập nhật cài đặt ngay, vd bật/tắt tự động in
+    io.emit('settings:updated', saved);
+    res.json(saved);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 'settings');
   }
 });
 
@@ -305,9 +384,11 @@ io.on('connection', (socket) => {
   });
 
   // ── Kết nối TikTok Live ──
-  socket.on('tiktok:connect', async ({ username }) => {
+  // payload = {}: client gửi event không kèm dữ liệu cũng không làm sập server
+  socket.on('tiktok:connect', async (payload = {}) => {
+    let sessionId = null;
     try {
-      const cleanUsername = sanitizeStr(username, 100).replace('@', '');
+      const cleanUsername = sanitizeStr(payload?.username, 100).replace('@', '');
       if (!cleanUsername) {
         socket.emit('tiktok:error', { message: 'Username không hợp lệ' });
         return;
@@ -315,7 +396,10 @@ io.on('connection', (socket) => {
 
       socket.emit('tiktok:status', { connected: false, username: cleanUsername, loading: true });
 
-      currentSessionId = await db.createSession(cleanUsername);
+      // Đóng phiên cũ (nếu đang live) trước khi mở phiên mới
+      if (currentSessionId) await db.endSession(currentSessionId);
+      sessionId = await db.createSession(cleanUsername);
+      currentSessionId = sessionId;
 
       await tiktok.connect(cleanUsername, {
         onConnected: ({ username: u, roomId }) => {
@@ -323,39 +407,42 @@ io.on('connection', (socket) => {
         },
 
         onComment: async (data) => {
-          // FIX: filter comment rỗng tại tầng socket
-          if (!data.comment || !data.comment.trim()) return;
+          try {
+            // FIX: filter comment rỗng tại tầng socket
+            if (!data.comment || !data.comment.trim()) return;
 
-          const dedupKey = `${data.tiktokUserId}_${data.comment}_${Math.floor(Date.now() / 3000)}`;
-          if (recentComments.has(dedupKey)) return;
-          recentComments.add(dedupKey);
-          setTimeout(() => recentComments.delete(dedupKey), 3000);
+            const dedupKey = `${data.tiktokUserId}_${data.comment}_${Math.floor(Date.now() / 3000)}`;
+            if (recentComments.has(dedupKey)) return;
+            recentComments.add(dedupKey);
+            setTimeout(() => recentComments.delete(dedupKey), 3000);
 
-          const commentId = await db.saveComment({
-            tiktokUserId: data.tiktokUserId,
-            username:     data.username,
-            displayName:  data.displayName,
-            comment:      data.comment,
-            sessionId:    currentSessionId,
-          });
+            const commentId = await db.saveComment({
+              tiktokUserId: data.tiktokUserId,
+              username:     data.username,
+              displayName:  data.displayName,
+              comment:      data.comment,
+              sessionId,
+            });
 
-          if (!commentId) return;  // saveComment trả null nếu comment rỗng
+            if (!commentId) return;  // saveComment trả null nếu comment rỗng
 
-          io.emit('comment:new', {
-            id:           commentId,
-            tiktokUserId: data.tiktokUserId,
-            username:     data.username,
-            displayName:  data.displayName,
-            comment:      data.comment,
-            timestamp:    data.timestamp,
-          });
+            io.emit('comment:new', {
+              id:           commentId,
+              tiktokUserId: data.tiktokUserId,
+              username:     data.username,
+              displayName:  data.displayName,
+              comment:      data.comment,
+              timestamp:    data.timestamp,
+            });
+          } catch (err) {
+            console.error('[Comment Error]', err.message);
+          }
         },
 
         onDisconnected: async () => {
-          if (currentSessionId) {
-            await db.endSession(currentSessionId);
-            currentSessionId = null;
-          }
+          // Chỉ đóng đúng phiên của kết nối này, không đụng phiên mới hơn
+          await db.endSession(sessionId).catch(e => console.error('[Session]', e.message));
+          if (currentSessionId === sessionId) currentSessionId = null;
           io.emit('tiktok:status', { connected: false, username: null });
         },
 
@@ -366,6 +453,11 @@ io.on('connection', (socket) => {
 
     } catch (err) {
       console.error('[TikTok Connect Error]', err.message);
+      // Kết nối thất bại → đóng phiên vừa tạo, không để phiên "mở mãi"
+      if (sessionId) {
+        await db.endSession(sessionId).catch(() => {});
+        if (currentSessionId === sessionId) currentSessionId = null;
+      }
       socket.emit('tiktok:error', { message: err.message });
       socket.emit('tiktok:status', { connected: false, username: null });
     }
@@ -385,68 +477,105 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── In bình luận → tạo Order ──
-  socket.on('print:comment', async ({ commentId }) => {
-    console.log(`[Print] Nhận yêu cầu in commentId: ${commentId}`);
+  // ── Chốt đơn từ bình luận + in phiếu ──
+  // Thứ tự an toàn: TẠO ĐƠN trước (unique theo commentId) → đánh dấu → IN.
+  // In lỗi thì đơn vẫn còn, bấm "In lại" (reprint: true) chỉ in, không tạo đơn mới.
+  socket.on('print:comment', async (payload = {}) => {
+    const commentId = payload?.commentId;
+    const reprint   = payload?.reprint === true;
+    console.log(`[Print] Nhận yêu cầu ${reprint ? 'in lại' : 'chốt'} commentId: ${commentId}`);
+
+    const fail = (message) => socket.emit('printer:status', { status: 'error', commentId, message });
 
     // Validate ObjectId
-    if (!commentId || !OBJECTID_RE.test(commentId)) {
-      socket.emit('printer:status', { status: 'error', message: 'commentId không hợp lệ' });
+    if (typeof commentId !== 'string' || !OBJECTID_RE.test(commentId)) {
+      fail('commentId không hợp lệ');
       return;
     }
 
+    let order;
     try {
       const comment = await db.getCommentById(commentId);
-      if (!comment) throw new Error('Không tìm thấy bình luận trong CSDL');
+      if (!comment) { fail('Không tìm thấy bình luận trong CSDL'); return; }
 
-      // FIX: markPrinted sẽ trả về null nếu đã in rồi (atomic check)
-      const marked = await db.markPrinted(commentId);
-      if (!marked) {
-        socket.emit('printer:status', { status: 'error', message: 'Đơn hàng này đã được in rồi' });
+      order = await db.getOrderByCommentId(commentId);
+
+      if (order && !reprint) {
+        fail(`Bình luận này đã chốt thành đơn ${order.orderNumber}. Bấm "In lại" nếu cần in thêm.`);
+        socket.emit('order:exists', { commentId, orderNumber: order.orderNumber });
+        return;
+      }
+      if (!order && reprint) { fail('Bình luận này chưa có đơn để in lại'); return; }
+
+      if (!order) {
+        const s = settings.load();
+        try {
+          order = await db.createOrder({
+            commentId,
+            tiktokUserId: comment.tiktokUserId,
+            username:     comment.username,
+            displayName:  comment.displayName,
+            note:         comment.comment,
+            sessionId:    comment.sessionId || currentSessionId,
+            prefix:       sanitizeStr(s.system?.orderPrefix, 10) || 'ORD',
+          });
+        } catch (err) {
+          // Thiết bị khác vừa chốt cùng bình luận (unique index commentId chặn đơn thứ 2)
+          if (err.code === 11000 && err.keyPattern?.commentId) {
+            fail('Bình luận này vừa được chốt ở thiết bị khác');
+            return;
+          }
+          throw err;
+        }
+
+        // Đơn đã tồn tại → nếu bước này lỗi, lần sau vẫn nhận ra nhờ Order.commentId
+        await db.markPrinted(commentId).catch(e => console.error('[Print] markPrinted:', e.message));
+
+        const customer = await db.getCustomerByTiktokId(comment.tiktokUserId);
+        io.emit('order:saved', {
+          commentId,
+          orderId:      String(order._id),
+          orderNumber:  order.orderNumber,
+          tiktokUserId: comment.tiktokUserId,
+          username:     comment.username,
+          displayName:  comment.displayName,
+          comment:      comment.comment,
+          timestamp:    comment.timestamp,
+          totalOrders:  customer?.totalOrders || 1,
+        });
+      }
+
+      try {
+        await printer.printComment({
+          tiktokUserId: comment.tiktokUserId,
+          username:     comment.username,
+          displayName:  comment.displayName,
+          comment:      comment.comment,
+          timestamp:    comment.timestamp,
+          orderNum:     order.orderNumber,
+        });
+      } catch (err) {
+        console.error('[Print Error]', err.message);
+        io.emit('printer:status', {
+          status: 'error',
+          commentId,
+          message: `Đã tạo đơn ${order.orderNumber} nhưng in lỗi: ${err.message}. Bấm "In lại" khi máy in sẵn sàng.`,
+        });
         return;
       }
 
-      await printer.printComment({
-        tiktokUserId: comment.tiktokUserId,
-        username:     comment.username,
-        displayName:  comment.displayName,
-        comment:      comment.comment,
-        timestamp:    comment.timestamp,
-      });
-
-      // Tạo Order record khi chốt đơn
-      const s     = settings.load();
-      const order = await db.createOrder({
+      io.emit('printer:status', {
+        status: 'ok',
         commentId,
-        tiktokUserId: comment.tiktokUserId,
-        username:     comment.username,
-        displayName:  comment.displayName,
-        note:         comment.comment,
-        sessionId:    currentSessionId,
-        prefix:       sanitizeStr(s.system?.orderPrefix, 10) || 'ORD',
+        message: `${reprint ? 'In lại' : 'In'} thành công! ${order.orderNumber}`,
       });
-
-      const customers = await db.getAllCustomers();
-      const customer  = customers.find(c => c.tiktokUserId === comment.tiktokUserId);
-
-      io.emit('order:saved', {
-        commentId,
-        orderId:      order._id.toString(),
-        orderNumber:  order.orderNumber,
-        tiktokUserId: comment.tiktokUserId,
-        username:     comment.username,
-        displayName:  comment.displayName,
-        comment:      comment.comment,
-        timestamp:    comment.timestamp,
-        totalOrders:  customer?.totalOrders || 1,
-      });
-
-      io.emit('printer:status', { status: 'ok', message: `In thành công! ${order.orderNumber}` });
       console.log('[Print] Hoàn tất —', order.orderNumber);
 
     } catch (err) {
-      console.error('[Print Error]', err.message);
-      io.emit('printer:status', { status: 'error', message: err.message });
+      console.error('[Chốt đơn Error]', err);
+      fail(order
+        ? `Đã tạo đơn ${order.orderNumber} nhưng có lỗi khi xử lý tiếp, hãy kiểm tra trang Đơn hàng`
+        : 'Lỗi máy chủ khi chốt đơn, chưa có đơn nào được tạo. Hãy thử lại.');
     }
   });
 

@@ -4,3 +4,10 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# Build & deploy
+frontend-react-dist/
+frontend-react/dist/
+.vercel/
+.env.local
+/dist/
