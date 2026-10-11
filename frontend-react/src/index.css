@@ -898,3 +898,11 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   .dash-stats     { grid-template-columns: 1fr; }
   .btn-connect, .btn-disconnect { font-size: 12px; padding: 7px 12px; }
 }
+
+/* Bản Vercel: báo phần chỉ chạy trên máy tính */
+.web-only-notice {
+  margin: 10px 16px 0; padding: 10px 14px;
+  border: 1px solid #FDE68A; border-radius: var(--radius-sm);
+  background: var(--yellow-bg); color: #92400E;
+  font-size: 13px; line-height: 1.45;
+}

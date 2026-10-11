@@ -83,9 +83,10 @@ export default function AuthPage({ onAuthenticated }) {
         setTab('login');
         setNotice('');
       }
-    } catch {
-      // Không phân biệt được "đã có tài khoản" hay "chưa" → báo rõ thay vì lặng lẽ ẩn tab Đăng ký
-      setServerDown(true);
+    } catch (err) {
+      // Không phân biệt được "đã có tài khoản" hay "chưa" → báo rõ thay vì lặng lẽ ẩn tab Đăng ký.
+      // Máy chủ có trả lời (vd thiếu MONGODB_URI trên Vercel) thì hiện đúng lý do.
+      setServerDown(err?.status ? err.message : true);
       setRegistrationOpen(false);
     } finally {
       setChecking(false);
@@ -179,7 +180,9 @@ export default function AuthPage({ onAuthenticated }) {
         >
           {serverDown && (
             <div className="auth-msg auth-msg-error" role="alert">
-              Không kết nối được máy chủ (backend). Kiểm tra backend đang chạy bản mới nhất rồi thử lại.
+              {typeof serverDown === 'string'
+                ? serverDown
+                : 'Không kết nối được máy chủ. Kiểm tra mạng hoặc cấu hình máy chủ rồi thử lại.'}
               <button type="button" className="auth-retry" onClick={checkStatus} disabled={checking}>
                 {checking ? 'Đang kiểm tra...' : 'Thử lại'}
               </button>

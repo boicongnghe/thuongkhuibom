@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // true khi build trên Vercel: không có Socket.io / TikTok Live / máy in (trừ khi đặt VITE_SOCKET_URL)
+    __ON_VERCEL__: JSON.stringify(!!process.env.VERCEL),
+  },
   server: {
     port: 5173,
     host: true,   // cho điện thoại cùng Wi-Fi mở được http://<IP máy tính>:5173

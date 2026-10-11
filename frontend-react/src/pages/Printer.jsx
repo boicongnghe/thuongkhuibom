@@ -38,7 +38,8 @@ export default function Printer() {
     api.checkPrinter().then(d => {
       setPrinterInfo(d.ok
         ? { text: `${d.printerName} · Sẵn sàng`, ok: true }
-        : { text: d.status === 'NOT_FOUND' ? 'Không tìm thấy máy in' : `${d.printerName} · Chưa kết nối`, ok: false }
+        : { text: d.status === 'NOT_LOCAL' ? 'Máy in chỉ dùng được trên máy tính'
+              : d.status === 'NOT_FOUND' ? 'Không tìm thấy máy in' : `${d.printerName} · Chưa kết nối`, ok: false }
       );
     }).catch(() => setPrinterInfo({ text: 'Lỗi kiểm tra', ok: false }));
   }, []);

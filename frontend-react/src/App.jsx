@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { authApi } from './api/auth';
-import socket    from './socket';
+import socket, { realtimeEnabled } from './socket';
 import AuthPage  from './components/AuthPage';
 import Sidebar   from './components/Sidebar';
 import Toast     from './components/Toast';
@@ -30,9 +30,9 @@ export default function App() {
     return () => window.removeEventListener('auth:expired', onExpired);
   }, []);
 
-  // Chỉ mở Socket.io khi đã đăng nhập
+  // Chỉ mở Socket.io khi đã đăng nhập (và có backend realtime — trên Vercel thì không)
   useEffect(() => {
-    if (user) socket.connect();
+    if (user && realtimeEnabled) socket.connect();
     else socket.disconnect();
   }, [user]);
 
