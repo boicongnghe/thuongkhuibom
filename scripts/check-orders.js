@@ -77,12 +77,15 @@ async function main() {
     }));
   }
 
-  // 4. Tạo unique index (chỉ khi đã sạch)
-  if (FIX || (!dupComments.length && !dupNumbers.length)) {
+  // 4. Tạo unique index — chỉ ở chế độ --fix (chế độ chỉ đọc không ghi gì vào DB)
+  const clean = !dupComments.length && !dupNumbers.length;
+  if (FIX) {
     await Order.createIndexes();
     console.log('\n[4] Đã tạo unique index cho Order.commentId và Order.orderNumber ✓');
+  } else if (clean) {
+    console.log('\n[4] Không có dữ liệu trùng ✓ — backend sẽ tự tạo unique index khi khởi động.');
   } else {
-    console.log('\n[4] Còn dữ liệu trùng → chưa tạo index. Chạy lại với --fix.');
+    console.log('\n[4] Còn dữ liệu trùng → chạy lại với --fix trước khi chạy backend.');
   }
 
   await mongoose.disconnect();

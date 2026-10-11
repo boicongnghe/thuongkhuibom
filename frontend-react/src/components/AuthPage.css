@@ -169,6 +169,21 @@
 .auth-msg-error { background: var(--a-err-bg);  color: var(--a-err-text);  border-color: var(--a-err-line); }
 .auth-msg-info  { background: var(--a-info-bg); color: var(--a-info-text); border-color: var(--a-info-line); }
 
+.auth-retry {
+  display: block;
+  margin-top: 10px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.auth-retry:disabled { opacity: 0.6; cursor: wait; }
+
 .auth-loading {
   position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
