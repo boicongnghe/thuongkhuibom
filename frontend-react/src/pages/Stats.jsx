@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Filler, Tooltip } from 'chart.js';
 import { api } from '../api';
-import { formatCurrency, formatDate, getInitials, buildDayLabels, mapChartDataToLabels, buildStatsLabels } from '../utils';
+import { formatCurrency, formatDate, formatDateTime, getInitials, buildDayLabels, mapChartDataToLabels, buildStatsLabels } from '../utils';
 import { useApp } from '../context/AppContext';
 import OrderSummary from '../components/OrderSummary';
+import StatusBadge from '../components/StatusBadge';
 
 // Bảng tổng kết chi tiết: số đơn, tiền, đã thu, còn phải thu...
 const SUMMARY_SCOPES = [
@@ -36,6 +37,11 @@ export default function Stats() {
   const [customers, setCustomers]     = useState([]);
   const [sumScope, setSumScope]       = useState('today');
   const [summary, setSummary]         = useState(null);
+  const [overview, setOverview]       = useState(null);   // (trước là trang Dashboard)
+
+  useEffect(() => {
+    api.getDashboard().then(setOverview).catch(() => showToast('Lỗi tải tổng quan', 'error'));
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -117,11 +123,32 @@ th{background:#f0f0f0}tr:nth-child(even)td{background:#fafafa}
     <div className="page-scroll">
       {/* Header */}
       <div className="page-header">
-        <h1 className="page-title">Thống kê</h1>
+        <div>
+          <h1 className="page-title">Thống kê</h1>
+          <div className="page-subtitle">Tổng quan, tổng kết đơn và biểu đồ</div>
+        </div>
         <div className="page-header-actions">
           <button className="btn-outline" onClick={exportCSV}>📊 Xuất Excel</button>
           <button className="btn-outline" onClick={exportPDF}>📄 Xuất PDF</button>
         </div>
+      </div>
+
+      {/* Tổng quan (gộp từ Dashboard) */}
+      <div className="dash-stats">
+        {[
+          { id: 'orders',    icon: '📦', label: 'Tổng đơn hàng',   value: (overview?.totalOrders ?? 0).toLocaleString('vi-VN'),    tone: 'blue' },
+          { id: 'revenue',   icon: '💰', label: 'Doanh thu (đã hoàn thành)', value: formatCurrency(overview?.totalRevenue || 0), tone: 'green' },
+          { id: 'customers', icon: '👥', label: 'Khách hàng',      value: (overview?.totalCustomers ?? 0).toLocaleString('vi-VN'), tone: 'sky' },
+          { id: 'sessions',  icon: '📺', label: 'Phiên livestream', value: (overview?.totalSessions ?? 0).toLocaleString('vi-VN'),  tone: 'amber' },
+        ].map(item => (
+          <div key={item.id} className="dash-stat-card">
+            <div className={`dash-stat-icon tone-${item.tone}`} aria-hidden="true">{item.icon}</div>
+            <div className="dash-stat-body">
+              <div className="dash-stat-value">{overview ? item.value : '—'}</div>
+              <div className="dash-stat-label">{item.label}</div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Tổng kết chi tiết */}
@@ -163,7 +190,7 @@ th{background:#f0f0f0}tr:nth-child(even)td{background:#fafafa}
           <div className="chart-wrap">
             {chartData && <Line data={{
               labels: rLabels,
-              datasets: [{ data: rValues, borderColor: '#6366F1', backgroundColor: 'rgba(99,102,241,0.08)', fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#6366F1' }],
+              datasets: [{ data: rValues, borderColor: '#2563EB', backgroundColor: 'rgba(37,99,235,0.08)', fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#2563EB' }],
             }} options={{ ...{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: SCALES }, scales: { ...SCALES, y: { ...SCALES.y, ticks: { ...SCALES.y.ticks, callback: v => formatCurrency(v) } } } }} />}
           </div>
         </div>
@@ -206,6 +233,27 @@ th{background:#f0f0f0}tr:nth-child(even)td{background:#fafafa}
             }
           </tbody>
         </table>
+      </div>
+
+      {/* Đơn mới nhất (gộp từ Dashboard) */}
+      <div className="stats-table-card">
+        <div className="stats-table-title">Đơn mới nhất</div>
+        <div className="dash-recent-list">
+          {!overview?.recentOrders?.length
+            ? <p style={{ color: 'var(--text-dim)', fontSize: 13, padding: '12px 0' }}>Chưa có đơn hàng</p>
+            : overview.recentOrders.map(o => (
+              <div key={o._id} className="dash-recent-row">
+                <div className="recent-info">
+                  <div className="recent-name">@{o.username} <span className="table-sub">{o.orderNumber}</span></div>
+                  <div className="recent-note">{(o.note || '').slice(0, 60)}{(o.note || '').length > 60 ? '...' : ''}</div>
+                </div>
+                <div className="recent-right">
+                  <StatusBadge status={o.status} />
+                  <div className="recent-time">{formatCurrency(o.amount)} · {formatDateTime(o.createdAt)}</div>
+                </div>
+              </div>
+            ))}
+        </div>
       </div>
     </div>
   );

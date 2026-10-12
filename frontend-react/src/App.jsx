@@ -8,7 +8,6 @@ import AuthPage  from './components/AuthPage';
 import HomePage  from './components/HomePage';
 import Sidebar   from './components/Sidebar';
 import Toast     from './components/Toast';
-import Dashboard  from './pages/Dashboard';
 import Livestream from './pages/Livestream';
 import Orders     from './pages/Orders';
 import Customers  from './pages/Customers';
@@ -71,7 +70,7 @@ export default function App() {
           <div className="content-wrapper">
             <Routes>
               <Route path="/"           element={<Navigate to="/livestream" replace />} />
-              <Route path="/dashboard"  element={<Dashboard />} />
+              <Route path="/dashboard"  element={<Navigate to="/stats" replace />} />
               <Route path="/livestream" element={<Livestream />} />
               <Route path="/orders"     element={<Orders />} />
               <Route path="/customers"  element={<Customers />} />
