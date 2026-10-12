@@ -29,7 +29,8 @@ async function request(path, { method = 'GET', body } = {}) {
 export const authApi = {
   status:   ()     => request('/api/auth/status'),
   login:    (body) => request('/api/auth/login', { method: 'POST', body }).then(d => d.user),
-  register: (body) => request('/api/auth/register', { method: 'POST', body }).then(d => d.user),
+  // Trả về { user } (tài khoản quản trị đầu tiên, vào luôn) hoặc { pending: true, message } (chờ duyệt)
+  register: (body) => request('/api/auth/register', { method: 'POST', body }),
   logout:   ()     => request('/api/auth/logout', { method: 'POST' }),
   logoutAll: ()    => request('/api/auth/logout-all', { method: 'POST' }),
   // Trả về user nếu còn đăng nhập, null nếu chưa / hết phiên

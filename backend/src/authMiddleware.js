@@ -49,6 +49,8 @@ async function userFromToken(token, typ) {
   if (!user) throw new Error('User not found');
   // Token tạo trước lần "Đăng xuất mọi thiết bị" gần nhất → hết hiệu lực
   if ((payload.tv || 0) !== (user.tokenVersion || 0)) throw new Error('Token revoked');
+  // Bị khoá / chưa duyệt → không dùng được nữa, kể cả đang đăng nhập dở
+  if (user.getStatus() !== 'active') throw new Error('User not active');
   return user;
 }
 

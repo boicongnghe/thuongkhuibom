@@ -36,14 +36,14 @@ App desktop ở mỗi shop (desktop/, Electron)
 
 Nếu để `centralUrl` trống, shop sẽ phải tự gõ địa chỉ ở lần mở app đầu tiên.
 
-## 3. Mời shop mới
+## 3. Thêm shop mới (duyệt đăng ký)
 
-1. Đăng nhập bằng tài khoản quản trị → **Cài đặt** → tab **👑 Quản trị dịch vụ**.
-2. Nhập ghi chú (tên shop), chọn thời hạn → **Tạo mã mời**.
-3. Bấm **Copy tin nhắn**, gửi kèm file cài app và `docs/HUONG-DAN-CAI-APP.md` cho shop.
-4. Mỗi mã chỉ dùng 1 lần. Mã gửi nhầm thì bấm **Thu hồi**.
+1. Gửi cho shop link trang của bạn. Trong **Cài đặt → 👑 Quản trị dịch vụ** có sẵn **tin nhắn mời** để copy.
+2. Shop tự bấm **Đăng ký**, nhập tên shop, số điện thoại, tên đăng nhập và mật khẩu. Tài khoản ở trạng thái **Chờ duyệt**, chưa đăng nhập được.
+3. Vào **Cài đặt → 👑 Quản trị dịch vụ**. Tên tab hiện số yêu cầu đang chờ. Gọi số điện thoại để xác nhận nếu cần, rồi bấm **✓ Duyệt** hoặc **Từ chối**.
+4. Ở mục **Các shop**: bấm **Khoá** để chặn ngay một shop (shop bị đăng xuất khỏi mọi thiết bị), bấm **Mở khoá** để cho dùng lại.
 
-Danh sách **Các shop đang dùng** cho biết số đơn của từng shop và lần đăng nhập gần nhất.
+Danh sách shop cho biết số đơn của từng shop và lần đăng nhập gần nhất.
 
 ## 4. Vận hành
 

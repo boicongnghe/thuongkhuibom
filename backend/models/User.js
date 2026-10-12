@@ -19,6 +19,13 @@ const userSchema = new mongoose.Schema({
   shopName:     { type: String, default: '', maxlength: 100 },
   role:         { type: String, enum: ['owner'], default: 'owner' },
   isAdmin:      { type: Boolean, default: false },
+  // Đăng ký mới → pending, quản trị duyệt → active. Tài khoản cũ (không có trường này) coi như active
+  // KHÔNG đặt default: Mongoose sẽ gán default cho cả tài khoản cũ khi đọc ra → khoá nhầm chủ shop.
+  // Lúc đăng ký luôn ghi rõ status.
+  status:       { type: String, enum: ['pending', 'active', 'rejected', 'disabled'] },
+  phone:        { type: String, default: '', maxlength: 20 },     // để quản trị liên hệ khi duyệt
+  reviewedBy:   { type: String, default: null },
+  reviewedAt:   { type: Date, default: null },
   failedLogins: { type: Number, default: 0, select: false },
   lockUntil:    { type: Date, default: null, select: false },
   // Tăng lên khi "Đăng xuất mọi thiết bị" → mọi JWT cũ mất hiệu lực ngay
@@ -29,6 +36,11 @@ const userSchema = new mongoose.Schema({
 // shopId luôn có: tài khoản cũ chưa có thì dùng chính _id
 userSchema.methods.getShopId = function getShopId() {
   return this.shopId || String(this._id);
+};
+
+// Tài khoản tạo trước khi có chức năng duyệt (không có status) → đang hoạt động
+userSchema.methods.getStatus = function getStatus() {
+  return this.status || 'active';
 };
 
 // Chỉ trả về các trường an toàn cho frontend

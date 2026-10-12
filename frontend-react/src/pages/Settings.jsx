@@ -20,7 +20,10 @@ const STORE_FIELDS = [
 
 export default function Settings() {
   const { user, settings, saveSettings, isConnected, showToast } = useApp();
-  const tabs = user?.isAdmin ? [...TABS, { key: 'admin', label: '👑 Quản trị dịch vụ' }] : TABS;
+  const [pendingCount, setPendingCount] = useState(0);
+  const tabs = user?.isAdmin
+    ? [...TABS, { key: 'admin', label: `👑 Quản trị dịch vụ${pendingCount ? ` (${pendingCount} chờ duyệt)` : ''}` }]
+    : TABS;
 
   const [activeTab, setActiveTab]   = useState('store');
   const [editing, setEditing]       = useState(false);
@@ -180,7 +183,7 @@ export default function Settings() {
       {/* Tab: Quản trị dịch vụ (chỉ tài khoản quản trị) */}
       {activeTab === 'admin' && user?.isAdmin && (
         <div className="settings-tab-content active">
-          <AdminPanel />
+          <AdminPanel onPendingChange={setPendingCount} />
         </div>
       )}
 

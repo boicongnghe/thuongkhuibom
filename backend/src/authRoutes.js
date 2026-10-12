@@ -3,7 +3,6 @@ const bcrypt    = require('bcryptjs');
 const mongoose  = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const User      = require('../models/User');
-const Invite    = require('../models/Invite');
 const { setSessionCookie, clearSessionCookie, requireAuth } = require('./authMiddleware');
 
 const router = express.Router();
@@ -43,8 +42,8 @@ function readCredentials(body) {
     username:   typeof body?.username === 'string' ? body.username.trim().toLowerCase() : '',
     password:   typeof body?.password === 'string' ? body.password : '',
     remember:   body?.remember === true,
-    inviteCode: typeof body?.inviteCode === 'string' ? body.inviteCode.trim().toUpperCase() : '',
     shopName:   typeof body?.shopName === 'string' ? body.shopName.trim().slice(0, 100) : '',
+    phone:      typeof body?.phone === 'string' ? body.phone.replace(/[^\d+]/g, '').slice(0, 20) : '',
   };
 }
 
@@ -78,41 +77,36 @@ const registerLimiter = rateLimit({
   message: { error: 'Bạn thử quá nhiều lần. Vui lòng thử lại sau.' },
 });
 
-// GET /api/auth/status — chưa có ai: đăng ký tự do (thành quản trị); đã có: cần mã mời
+// Tối đa bấy nhiêu yêu cầu đang chờ duyệt (chống spam đăng ký)
+const MAX_PENDING = 50;
+
+// GET /api/auth/status — chưa có ai: người đầu tiên là quản trị; đã có: đăng ký xong chờ duyệt
 router.get('/status', async (req, res) => {
   try {
     const count = await User.estimatedDocumentCount();
-    res.json({ registrationOpen: true, needsInvite: count > 0, firstUser: count === 0 });
+    res.json({ registrationOpen: true, firstUser: count === 0, requiresApproval: count > 0 });
   } catch (err) {
     console.error('[Auth] status:', err.message);
     res.status(500).json({ error: 'Lỗi máy chủ' });
   }
 });
 
-// POST /api/auth/register
-// POST /api/auth/register — mỗi tài khoản là 1 shop mới (dữ liệu riêng)
+// POST /api/auth/register — mỗi tài khoản là 1 shop mới (dữ liệu riêng).
+// Người đầu tiên = quản trị (dùng ngay). Người sau: tạo ở trạng thái CHỜ DUYỆT, chưa đăng nhập được.
 router.post('/register', registerLimiter, async (req, res) => {
-  const { username, password, remember, inviteCode, shopName } = readCredentials(req.body);
+  const { username, password, remember, shopName, phone } = readCredentials(req.body);
 
   const invalid = validateUsername(username) || validatePassword(password);
   if (invalid) return res.status(400).json({ error: invalid });
 
-  let invite = null;
   try {
     if (await User.exists({ username })) {
       return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
     }
 
     const isFirst = (await User.estimatedDocumentCount()) === 0 && await claimFirstAdmin();
-    if (!isFirst) {
-      if (!inviteCode) return res.status(403).json({ error: 'Cần mã mời để đăng ký shop mới. Liên hệ người quản lý dịch vụ.' });
-      // Giữ chỗ mã mời nguyên tử: 2 người dùng cùng 1 mã thì chỉ 1 người được
-      invite = await Invite.findOneAndUpdate(
-        { code: inviteCode, usedAt: null, revokedAt: null, expiresAt: { $gt: new Date() } },
-        { $set: { usedAt: new Date(), usedBy: username } },
-        { new: true },
-      );
-      if (!invite) return res.status(403).json({ error: 'Mã mời không đúng, đã dùng hoặc đã hết hạn' });
+    if (!isFirst && (await User.countDocuments({ status: 'pending' })) >= MAX_PENDING) {
+      return res.status(429).json({ error: 'Đang có quá nhiều yêu cầu chờ duyệt. Vui lòng thử lại sau.' });
     }
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
@@ -120,17 +114,24 @@ router.post('/register', registerLimiter, async (req, res) => {
     const user = await User.create({
       _id, username, passwordHash,
       shopId: String(_id),
-      shopName: shopName || invite?.note || '',
+      shopName,
+      phone,
       isAdmin: isFirst,
-      lastLoginAt: new Date(),
+      status: isFirst ? 'active' : 'pending',
+      lastLoginAt: isFirst ? new Date() : null,
     });
 
-    setSessionCookie(res, user, remember);
-    console.log(`[Auth] Đã tạo shop ${username}${isFirst ? ' (quản trị)' : ` bằng mã ${inviteCode}`}`);
-    res.status(201).json({ user });
+    if (isFirst) {
+      setSessionCookie(res, user, remember);
+      console.log(`[Auth] Đã tạo tài khoản quản trị ${username}`);
+      return res.status(201).json({ user });
+    }
+    console.log(`[Auth] Yêu cầu đăng ký chờ duyệt: ${username}`);
+    res.status(202).json({
+      pending: true,
+      message: 'Đã gửi yêu cầu đăng ký. Vui lòng chờ quản trị duyệt — sau khi được duyệt bạn đăng nhập bằng tài khoản vừa tạo.',
+    });
   } catch (err) {
-    // Tạo tài khoản lỗi → trả lại mã mời để dùng lại được
-    if (invite) await Invite.updateOne({ _id: invite._id }, { $set: { usedAt: null, usedBy: null } }).catch(() => {});
     if (err.code === 11000) return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
     console.error('[Auth] register:', err.message);
     res.status(500).json({ error: 'Không tạo được tài khoản, thử lại sau' });
@@ -176,6 +177,18 @@ router.post('/login', loginLimiter, async (req, res) => {
         }
       }
       return res.status(401).json({ error: LOGIN_FAILED_MSG });
+    }
+
+    // Mật khẩu đúng rồi mới báo trạng thái (người lạ không dò được tài khoản nào đang chờ)
+    const status = user.getStatus();
+    if (status !== 'active') {
+      await User.updateOne({ _id: user._id }, { failedLogins: 0 });
+      const msg = {
+        pending:  'Tài khoản đang chờ quản trị duyệt. Vui lòng quay lại sau.',
+        rejected: 'Yêu cầu đăng ký đã bị từ chối. Liên hệ quản trị để biết thêm.',
+        disabled: 'Tài khoản đã bị khoá. Liên hệ quản trị để mở lại.',
+      }[status] || 'Tài khoản chưa được kích hoạt';
+      return res.status(403).json({ error: msg, status });
     }
 
     await User.updateOne({ _id: user._id }, { failedLogins: 0, lockUntil: null, lastLoginAt: new Date() });
