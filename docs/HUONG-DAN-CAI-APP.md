@@ -35,6 +35,18 @@ Dữ liệu của shop bạn **tách riêng hoàn toàn** với các shop khác.
 - **Nhập tiền nhanh:** ở cột "Đã chốt", gõ `189k`, `1tr2` hoặc `250.000` rồi bấm Enter.
 - **In lại:** bấm **In lại** ở bình luận hoặc ở trang Đơn hàng.
 
+## Dồn đơn · đi đơn · xả hàng (trang Khách hàng)
+
+- **Dồn đơn & đi đơn:** mỗi khách có các đơn chưa đi được gom vào một thẻ.
+  - **Đã cọc**: khách đã cọc nên được dồn tiếp, không bị tính hạn.
+  - **Chờ cọc**: hiện thời gian còn lại để khách cọc.
+  - **Quá hạn cọc**: khách chưa cọc quá 24 giờ (đổi được trong Cài đặt → Hệ thống) → nên xả hàng.
+- **Ghi cọc:** gõ số tiền khách cọc cho cả nhóm đơn (ví dụ `50k`) → **Lưu cọc**.
+- **Đi đơn:** tích chọn các đơn muốn đi (ví dụ 3 đơn dồn + 2 đơn mới) → **Đi đơn** → kiểm tra số tiền **Thu khi giao (COD)** → xác nhận. Máy in ra **phiếu đi đơn**, và các đơn chuyển sang **"Đã đi đơn"**.
+- **In phiếu tổng:** in danh sách đơn, tổng tiền, đã cọc, còn phải thu của khách. Bước này không đổi trạng thái đơn.
+- **Xả hàng:** huỷ các đơn dồn (của khách quá hạn, hoặc các đơn đang tích chọn). Nếu khách đã cọc thì ghi **mất cọc**. Nút **Xả hàng tất cả** xả mọi khách quá hạn cọc trong một lần.
+- **Theo ngày:** chọn một ngày để xem số đơn đã chốt, tổng tiền, cọc, số đơn đã đi, số đơn bị xả và tiền mất cọc, kèm chi tiết từng khách. Bấm **In tổng kết ngày** để in ra.
+
 ## 4. Lưu ý quan trọng
 
 - **App trên máy cắm máy in phải đang mở** thì mới nhận được bình luận và in được. Bấm X thì app **chạy ngầm ở khay đồng hồ** (góc phải dưới màn hình). Muốn tắt hẳn: chuột phải biểu tượng → **Thoát**.

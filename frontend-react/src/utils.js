@@ -150,3 +150,24 @@ export function buildStatsLabels(chartData, period) {
     `${String(d._id.day).padStart(2,'0')}/${String(d._id.month).padStart(2,'0')}`
   );
 }
+
+// Ngày hôm nay theo giờ Việt Nam dạng "YYYY-MM-DD" (cho ô chọn ngày)
+export function vnToday(offsetDays = 0) {
+  const d = new Date(Date.now() + 7 * 3600 * 1000 + offsetDays * 86400 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+export function shiftDate(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// "còn 5 giờ 20 phút" / "quá 3 giờ"
+export function formatDuration(ms) {
+  const m = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(m / 60);
+  if (h >= 24) return `${Math.floor(h / 24)} ngày ${h % 24} giờ`;
+  if (h > 0) return `${h} giờ ${m % 60} phút`;
+  return `${m} phút`;
+}

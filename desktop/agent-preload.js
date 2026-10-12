@@ -13,6 +13,8 @@ if (allowedOrigin && location.origin === allowedOrigin) {
   };
 
   contextBridge.exposeInMainWorld('desktopAgent', {
+    // Loại phiếu app này in được — web dựa vào đây để không giao phiếu mới cho app cũ
+    features:     ['order', 'report'],
     status:       ()     => ipcRenderer.invoke('agent:status'),
     connect:      (opts) => ipcRenderer.invoke('agent:connect', opts),
     disconnect:   ()     => ipcRenderer.invoke('agent:disconnect'),

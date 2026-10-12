@@ -4,11 +4,20 @@ import { formatCurrency, formatDate, formatDateTime, getInitials } from '../util
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { useApp } from '../context/AppContext';
+import HoldOrders from '../components/HoldOrders';
+import CustomerDaily from '../components/CustomerDaily';
+
+const TABS = [
+  { key: 'holds', label: '📦 Dồn đơn & đi đơn' },
+  { key: 'daily', label: '📅 Theo ngày' },
+  { key: 'list',  label: '👥 Danh sách khách' },
+];
 
 const PER_PAGE = 12;
 
 export default function Customers() {
   const { showToast } = useApp();
+  const [tab, setTab]           = useState('holds');
   const [all, setAll]           = useState([]);
   const [displayed, setDisplayed] = useState([]);
   const [page, setPage]         = useState(1);
@@ -112,6 +121,19 @@ export default function Customers() {
         <span className="page-subtitle">{all.length} khách hàng</span>
       </div>
 
+      <div className="settings-tabs" role="tablist" aria-label="Chức năng khách hàng">
+        {TABS.map(t => (
+          <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+            className={`settings-tab${tab === t.key ? ' active' : ''}`} onClick={() => setTab(t.key)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'holds' && <HoldOrders />}
+      {tab === 'daily' && <CustomerDaily />}
+
+      {tab === 'list' && <>
       {/* Filter bar */}
       <div className="filter-bar">
         <input type="text" className="search-input" placeholder="Tìm theo tên, email, SĐT..."
@@ -150,6 +172,7 @@ export default function Customers() {
         </div>
         <Pagination current={page} total={totalPages} onPage={setPage} />
       </div>
+      </>}
 
       {/* Detail drawer */}
       {drawer !== null && (

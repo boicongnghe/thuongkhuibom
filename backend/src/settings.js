@@ -29,6 +29,7 @@ const DEFAULTS = {
     timezone:           'Asia/Ho_Chi_Minh',
     currency:           'VND',
     orderPrefix:        'ORD',
+    depositDeadlineHours: 24,      // dồn đơn: chưa cọc quá bấy nhiêu giờ → quá hạn, cần xả hàng
   },
 };
 

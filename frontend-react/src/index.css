@@ -979,3 +979,57 @@ textarea.form-input { resize: vertical; min-height: 72px; }
 .approve-name { font-weight: 700; font-size: 15px; }
 .approve-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; }
 .approve-actions { display: flex; gap: 8px; }
+
+/* ══ Dồn đơn · đi đơn · theo ngày ══ */
+.hold-page { display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
+.hold-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; padding: 14px 20px 0; }
+.hold-release-all { margin-top: 8px; width: 100%; min-height: 34px; border: 0; border-radius: var(--radius-sm); background: #B91C1C; color: #fff; font-family: var(--font); font-weight: 700; font-size: 12px; cursor: pointer; }
+.hold-release-all:disabled { opacity: .6; }
+.hold-list { display: flex; flex-direction: column; gap: 12px; padding: 0 20px; }
+.hold-card { background: var(--surface); border: 1px solid var(--border); border-left-width: 1px; border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.hold-card.state-overdue { border-color: #FCA5A5; box-shadow: 0 0 0 1px #FCA5A5 inset; }
+.hold-card.state-waiting { border-color: #FCD34D; }
+.hold-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.hold-name { font-weight: 800; font-size: 16px; }
+.hold-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.hold-state { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; }
+.hold-state-covered { background: var(--green-bg); color: #047857; }
+.hold-state-waiting { background: var(--yellow-bg); color: #92400E; }
+.hold-state-overdue { background: var(--red-bg); color: #B91C1C; }
+.hold-totals { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--text-secondary); }
+.hold-totals b { color: var(--text); font-variant-numeric: tabular-nums; }
+.hold-orders { display: flex; flex-direction: column; border: 1px solid var(--surface3); border-radius: var(--radius-sm); overflow: hidden; }
+.hold-order { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--surface3); flex-wrap: wrap; }
+.hold-order:first-child { border-top: 0; }
+.hold-order.is-selected { background: var(--primary-light); }
+.hold-order input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--primary); flex-shrink: 0; cursor: pointer; }
+.hold-order-all { background: var(--surface2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.hold-order-main { flex: 1 1 220px; min-width: 0; }
+.hold-order-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hold-order-time { font-size: 11px; color: var(--text-dim); }
+.hold-order-note { font-size: 13px; color: var(--text-secondary); margin-top: 2px; overflow-wrap: anywhere; }
+.hold-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; }
+.hold-deposit { display: flex; gap: 6px; align-items: center; }
+.hold-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.hold-btn-danger { color: #B91C1C; border-color: #FECACA; }
+.hold-ship-lines { border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 200px; overflow-y: auto; }
+.hold-ship-lines div { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 13px; border-top: 1px solid var(--surface3); }
+.hold-ship-lines div:first-child { border-top: 0; }
+.hold-ship-total { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.hold-ship-total div { display: flex; justify-content: space-between; }
+.hold-ship-cod { font-size: 16px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.daily-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 14px 20px 0; }
+.daily-date { width: auto; min-height: 40px; }
+.daily-print { margin-left: auto; }
+.daily-title { font-size: 16px; font-weight: 800; padding: 0 20px; }
+.daily-total-row td { font-weight: 800; background: var(--surface2); }
+@media (max-width: 768px) {
+  .hold-kpis, .hold-list, .daily-bar, .daily-title { padding-left: 12px; padding-right: 12px; }
+  .hold-actions { flex-direction: column; align-items: stretch; }
+  .hold-buttons > button { flex: 1 1 auto; }
+  .daily-print { margin-left: 0; width: 100%; }
+}
+@media (max-width: 768px) {
+  .hold-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .hold-kpis .sum-kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
