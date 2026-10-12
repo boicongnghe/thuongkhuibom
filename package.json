@@ -1,6 +1,6 @@
 {
   "name": "tiktok-chot-don",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Phần mềm chốt đơn realtime cho người bán hàng livestream TikTok",
   "main": "desktop/main.js",
   "scripts": {

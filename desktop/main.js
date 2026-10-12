@@ -178,7 +178,8 @@ ipcMain.handle('setup:testUrl', async (e, input) => {
   try {
     const res = await net.fetch(`${url}/api/auth/status`, { signal: AbortSignal.timeout(10000) });
     const data = await res.json().catch(() => null);
-    if (res.ok && typeof data?.needsInvite === 'boolean') return { ok: true, url, message: `Kết nối được dịch vụ ${url}` };
+    // Dịch vụ Chốt Đơn luôn trả về registrationOpen (true/false) ở /api/auth/status
+    if (res.ok && typeof data?.registrationOpen === 'boolean') return { ok: true, url, message: `Kết nối được dịch vụ ${url}` };
     if (data?.error) return { ok: false, message: data.error };
     return { ok: false, message: `Địa chỉ này không phải dịch vụ Chốt Đơn (HTTP ${res.status})` };
   } catch (err) {
