@@ -78,7 +78,8 @@ try {
 } catch (err) {
   // Thiếu JWT_SECRET → dừng ngay, tránh chạy với cấu hình không an toàn
   console.error('[Auth]', err.message);
-  process.exit(1);
+  if (require.main === module) process.exit(1);
+  throw err;   // chạy trong app desktop: để app hiện lỗi thay vì tắt ngang
 }
 
 // Serve React build (production) or old frontend (fallback)
@@ -339,18 +340,39 @@ io.on('connection', (socket) => {
 });
 
 // ── Bootstrap ─────────────────────────────────────────────
-(async () => {
-  try {
+// Kết nối MongoDB rồi mở cổng. Trả về Promise để app desktop (desktop/main.js)
+// biết khi nào sẵn sàng hoặc hiện lỗi (sai chuỗi MongoDB, cổng bị chiếm...).
+let started = null;
+function start(port = PORT) {
+  if (started) return started;
+  started = (async () => {
     await db.connectDB();
-    httpServer.listen(PORT, () => {
-      console.log(`\n🚀 TikTok Chốt Đơn đang chạy tại: http://localhost:${PORT}`);
-      console.log(`🖨️  Printer: ${process.env.PRINTER_NAME || 'chưa cấu hình'}`);
-      console.log(`🏪 Shop: ${process.env.SHOP_NAME || 'SHOP CỦA BẠN'}\n`);
+    await new Promise((resolve, reject) => {
+      const onError = (err) => { httpServer.off('listening', onListening); reject(err); };
+      const onListening = () => { httpServer.off('error', onError); resolve(); };
+      httpServer.once('error', onError);
+      httpServer.once('listening', onListening);
+      httpServer.listen(port);
     });
+    console.log(`\n🚀 TikTok Chốt Đơn đang chạy tại: http://localhost:${port}`);
+    console.log(`🖨️  Printer: ${process.env.PRINTER_NAME || 'chưa cấu hình'}`);
+    console.log(`🏪 Shop: ${process.env.SHOP_NAME || 'SHOP CỦA BẠN'}\n`);
     reportStatus();
     setInterval(reportStatus, STATUS_INTERVAL_MS).unref();
-  } catch (err) {
-    console.error('[MongoDB] Kết nối thất bại:', err.message);
+    return { port };
+  })();
+  started.catch(() => { started = null; });
+  return started;
+}
+
+module.exports = { start, httpServer };
+
+// Chạy trực tiếp (npm start / npm run dev): tự khởi động như trước
+if (require.main === module) {
+  start().catch((err) => {
+    console.error(err.code === 'EADDRINUSE'
+      ? `[Server] Cổng ${PORT} đang bị chương trình khác dùng`
+      : `[MongoDB] Kết nối thất bại: ${err.message}`);
     process.exit(1);
-  }
-})();
+  });
+}
