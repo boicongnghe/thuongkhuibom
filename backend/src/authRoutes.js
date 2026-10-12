@@ -1,10 +1,10 @@
 const express   = require('express');
 const bcrypt    = require('bcryptjs');
+const mongoose  = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const User      = require('../models/User');
-const {
-  setSessionCookie, clearSessionCookie, requireAuth, signSocketToken,
-} = require('./authMiddleware');
+const Invite    = require('../models/Invite');
+const { setSessionCookie, clearSessionCookie, requireAuth } = require('./authMiddleware');
 
 const router = express.Router();
 
@@ -40,10 +40,24 @@ function validatePassword(password) {
 
 function readCredentials(body) {
   return {
-    username: typeof body?.username === 'string' ? body.username.trim().toLowerCase() : '',
-    password: typeof body?.password === 'string' ? body.password : '',
-    remember: body?.remember === true,
+    username:   typeof body?.username === 'string' ? body.username.trim().toLowerCase() : '',
+    password:   typeof body?.password === 'string' ? body.password : '',
+    remember:   body?.remember === true,
+    inviteCode: typeof body?.inviteCode === 'string' ? body.inviteCode.trim().toUpperCase() : '',
+    shopName:   typeof body?.shopName === 'string' ? body.shopName.trim().slice(0, 100) : '',
   };
+}
+
+// Tài khoản đầu tiên của hệ thống = quản trị. Dùng 1 document đánh dấu có _id cố định:
+// 2 người đăng ký cùng lúc thì chỉ 1 người chèn được → chỉ có 1 quản trị.
+async function claimFirstAdmin() {
+  try {
+    await mongoose.connection.collection('settings').insertOne({ _id: '__first_admin', at: new Date() });
+    return true;
+  } catch (err) {
+    if (err.code === 11000) return false;
+    throw err;
+  }
 }
 
 // ── Giới hạn theo IP (lớp bảo vệ thứ 2, ngoài khoá theo tài khoản) ──
@@ -64,11 +78,11 @@ const registerLimiter = rateLimit({
   message: { error: 'Bạn thử quá nhiều lần. Vui lòng thử lại sau.' },
 });
 
-// GET /api/auth/status — frontend dùng để ẩn tab Đăng ký khi đã có tài khoản
+// GET /api/auth/status — chưa có ai: đăng ký tự do (thành quản trị); đã có: cần mã mời
 router.get('/status', async (req, res) => {
   try {
-    const count = await User.countDocuments({});
-    res.json({ registrationOpen: count === 0 });
+    const count = await User.estimatedDocumentCount();
+    res.json({ registrationOpen: true, needsInvite: count > 0, firstUser: count === 0 });
   } catch (err) {
     console.error('[Auth] status:', err.message);
     res.status(500).json({ error: 'Lỗi máy chủ' });
@@ -76,30 +90,48 @@ router.get('/status', async (req, res) => {
 });
 
 // POST /api/auth/register
+// POST /api/auth/register — mỗi tài khoản là 1 shop mới (dữ liệu riêng)
 router.post('/register', registerLimiter, async (req, res) => {
-  const { username, password, remember } = readCredentials(req.body);
+  const { username, password, remember, inviteCode, shopName } = readCredentials(req.body);
 
   const invalid = validateUsername(username) || validatePassword(password);
   if (invalid) return res.status(400).json({ error: invalid });
 
+  let invite = null;
   try {
-    if (await User.countDocuments({}) > 0) {
-      return res.status(403).json({ error: 'Đã có tài khoản. Chức năng đăng ký đã bị khoá.' });
+    if (await User.exists({ username })) {
+      return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
+    }
+
+    const isFirst = (await User.estimatedDocumentCount()) === 0 && await claimFirstAdmin();
+    if (!isFirst) {
+      if (!inviteCode) return res.status(403).json({ error: 'Cần mã mời để đăng ký shop mới. Liên hệ người quản lý dịch vụ.' });
+      // Giữ chỗ mã mời nguyên tử: 2 người dùng cùng 1 mã thì chỉ 1 người được
+      invite = await Invite.findOneAndUpdate(
+        { code: inviteCode, usedAt: null, revokedAt: null, expiresAt: { $gt: new Date() } },
+        { $set: { usedAt: new Date(), usedBy: username } },
+        { new: true },
+      );
+      if (!invite) return res.status(403).json({ error: 'Mã mời không đúng, đã dùng hoặc đã hết hạn' });
     }
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const user = await User.create({ username, passwordHash, lastLoginAt: new Date() });
+    const _id = new mongoose.Types.ObjectId();
+    const user = await User.create({
+      _id, username, passwordHash,
+      shopId: String(_id),
+      shopName: shopName || invite?.note || '',
+      isAdmin: isFirst,
+      lastLoginAt: new Date(),
+    });
 
     setSessionCookie(res, user, remember);
-    console.log('[Auth] Đã tạo tài khoản:', username);
+    console.log(`[Auth] Đã tạo shop ${username}${isFirst ? ' (quản trị)' : ` bằng mã ${inviteCode}`}`);
     res.status(201).json({ user });
   } catch (err) {
-    if (err.code === 11000) {
-      if (err.keyPattern?.owner) {
-        return res.status(403).json({ error: 'Đã có tài khoản. Chức năng đăng ký đã bị khoá.' });
-      }
-      return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
-    }
+    // Tạo tài khoản lỗi → trả lại mã mời để dùng lại được
+    if (invite) await Invite.updateOne({ _id: invite._id }, { $set: { usedAt: null, usedBy: null } }).catch(() => {});
+    if (err.code === 11000) return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
     console.error('[Auth] register:', err.message);
     res.status(500).json({ error: 'Không tạo được tài khoản, thử lại sau' });
   }
@@ -165,8 +197,6 @@ router.post('/logout', (req, res) => {
 router.post('/logout-all', requireAuth, async (req, res) => {
   try {
     await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
-    // Cắt luôn các kết nối realtime đang mở (điện thoại, máy khác...)
-    req.app.get('io')?.disconnectSockets(true);
     clearSessionCookie(res);
     console.log('[Auth] Đăng xuất mọi thiết bị:', req.user.username);
     res.json({ ok: true });
@@ -179,11 +209,6 @@ router.post('/logout-all', requireAuth, async (req, res) => {
 // GET /api/auth/me — kiểm tra còn đăng nhập không khi mở app
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
-});
-
-// GET /api/auth/socket-token — token 2 phút để mở Socket.io (kể cả khác domain)
-router.get('/socket-token', requireAuth, (req, res) => {
-  res.json({ token: signSocketToken(req.user) });
 });
 
 module.exports = router;

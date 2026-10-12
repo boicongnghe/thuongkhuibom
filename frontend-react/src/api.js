@@ -1,17 +1,29 @@
 import { API_BASE } from './api/auth';
 
 async function request(url, options = {}) {
-  const res = await fetch(API_BASE + url, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'chotdon' },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(API_BASE + url, {
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'chotdon' },
+      ...options,
+    });
+  } catch {
+    throw new Error('Mất kết nối mạng, đang thử lại...');
+  }
   const data = await res.json().catch(() => ({}));
   // Hết phiên đăng nhập → báo cho App hiện lại trang đăng nhập
   if (res.status === 401) window.dispatchEvent(new Event('auth:expired'));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
+
+const post = (url, body) => request(url, { method: 'POST', body: JSON.stringify(body || {}) });
+const put  = (url, body) => request(url, { method: 'PUT',  body: JSON.stringify(body || {}) });
 
 export const api = {
   // Dashboard
@@ -21,27 +33,48 @@ export const api = {
   // Tổng kết đơn: scope = session | today | 7d | 30d | all
   getSummary: (scope = 'session')        => request(`/api/stats/summary?scope=${scope}`),
 
-  // Comments (tải lại bình luận của phiên live khi mở trang)
-  getRecentComments: (limit = 200)       => request(`/api/comments/recent?limit=${limit}`),
+  // Live: trạng thái app desktop ở shop + lệnh kết nối/ngắt từ bất kỳ thiết bị nào
+  getLiveState: ()                       => request('/api/live/state'),
+  setDesiredLive: (on, username = '')    => put('/api/live/desired', { on, username }),
+  createSession: (tiktokUsername)        => post('/api/live/sessions', { tiktokUsername }),
+  endSession: (id)                       => post(`/api/live/sessions/${id}/end`),
+  reportAgentStatus: (body)              => post('/api/agent/status', body),
+
+  // Bình luận
+  getRecentComments: ({ limit = 200, afterId, sessionId } = {}) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (afterId) q.set('afterId', afterId);
+    if (sessionId) q.set('sessionId', sessionId);
+    return request(`/api/comments/recent?${q}`);
+  },
+  postComments: (sessionId, comments)    => post('/api/comments/batch', { sessionId, comments }),
 
   // Orders
   getOrders: (params)                    => request(`/api/orders?${new URLSearchParams(params)}`),
-  createOrder: (body)                    => request('/api/orders', { method: 'POST', body: JSON.stringify(body) }),
-  updateOrderStatus: (id, status)        => request(`/api/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
-  updateOrderAmount: (id, body)          => request(`/api/orders/${id}/amount`, { method: 'PUT', body: JSON.stringify(body) }),
+  createOrder: (body)                    => post('/api/orders', body),
+  orderFromComment: (commentId, print = true) => post('/api/orders/from-comment', { commentId, print }),
+  reprintOrder: (id)                     => post(`/api/orders/${id}/print`),
+  updateOrderStatus: (id, status)        => put(`/api/orders/${id}/status`, { status }),
+  updateOrderAmount: (id, body)          => put(`/api/orders/${id}/amount`, body),
+
+  // Hàng đợi in (chỉ app desktop dùng)
+  claimPrintJob: ()                      => post('/api/print-queue/claim'),
+  finishPrintJob: (id, ok, error = '')   => post(`/api/print-queue/${id}/done`, { ok, error }),
 
   // Customers
   getCustomers: ()                       => request('/api/customers'),
   searchCustomers: (q)                   => request(`/api/customers/search?q=${encodeURIComponent(q)}`),
   getCustomer: (id)                      => request(`/api/customers/${id}`),
   getCustomerOrders: (id)                => request(`/api/customers/${id}/orders`),
-  updateCustomer: (id, body)             => request(`/api/customers/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-
-  // Printer
-  checkPrinter: ()                       => request('/api/printer/check'),
-  testPrinterIP: (ip, port)              => request('/api/printer/test-ip', { method: 'POST', body: JSON.stringify({ ip, port }) }),
+  updateCustomer: (id, body)             => put(`/api/customers/${id}`, body),
 
   // Settings
   getSettings: ()                        => request('/api/settings'),
-  saveSettings: (body)                   => request('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  saveSettings: (body)                   => put('/api/settings', body),
+
+  // Quản trị dịch vụ (tài khoản đầu tiên)
+  getInvites: ()                         => request('/api/admin/invites'),
+  createInvite: (note, days = 7)         => post('/api/admin/invites', { note, days }),
+  revokeInvite: (code)                   => request(`/api/admin/invites/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+  getShops: ()                           => request('/api/admin/shops'),
 };

@@ -1,27 +1,27 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { api } from '../api';
-import socket from '../socket';
+import { liveBus } from '../agent';
 
 const AppContext = createContext(null);
 
-export function AppProvider({ children }) {
+export function AppProvider({ user, children }) {
   const [settings, setSettings]               = useState(null);
   const [isConnected, setIsConnected]         = useState(false);
   const [tiktokUsername, setTiktokUsername]   = useState('');
   const [toast, setToast]                     = useState({ show: false, msg: '', type: 'info' });
   const [toastTimer, setToastTimer]           = useState(null);
 
-  // Load settings on mount
-  useEffect(() => {
+  const loadSettings = useCallback(() => {
     api.getSettings().then(s => setSettings(s)).catch(console.error);
   }, []);
 
-  // Cài đặt đổi ở thiết bị khác (vd bật tự động in trên điện thoại) → cập nhật ngay
+  // Tải cài đặt khi mở app, và khi quay lại cửa sổ (có thể đã đổi ở thiết bị khác)
   useEffect(() => {
-    const onSettings = (s) => setSettings(s);
-    socket.on('settings:updated', onSettings);
-    return () => socket.off('settings:updated', onSettings);
-  }, []);
+    loadSettings();
+    const onFocus = () => { if (document.visibilityState === 'visible') loadSettings(); };
+    document.addEventListener('visibilitychange', onFocus);
+    return () => document.removeEventListener('visibilitychange', onFocus);
+  }, [loadSettings]);
 
   const showToast = useCallback((msg, type = 'info', duration = 2800) => {
     if (toastTimer) clearTimeout(toastTimer);
@@ -33,11 +33,13 @@ export function AppProvider({ children }) {
   const saveSettings = useCallback(async (patch) => {
     const updated = await api.saveSettings(patch);
     setSettings(updated);
+    liveBus.emit('settings-changed', updated);   // app desktop dùng ngay quy tắc tự động in mới
     return updated;
   }, []);
 
   return (
     <AppContext.Provider value={{
+      user,
       settings, setSettings, saveSettings,
       isConnected, setIsConnected,
       tiktokUsername, setTiktokUsername,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { authApi } from '../api/auth';
+import AdminPanel from '../components/AdminPanel';
 
 const TABS = [
   { key: 'store',  label: '🏪 Thông tin cửa hàng' },
@@ -18,7 +19,8 @@ const STORE_FIELDS = [
 ];
 
 export default function Settings() {
-  const { settings, saveSettings, isConnected, showToast } = useApp();
+  const { user, settings, saveSettings, isConnected, showToast } = useApp();
+  const tabs = user?.isAdmin ? [...TABS, { key: 'admin', label: '👑 Quản trị dịch vụ' }] : TABS;
 
   const [activeTab, setActiveTab]   = useState('store');
   const [editing, setEditing]       = useState(false);
@@ -114,7 +116,7 @@ export default function Settings() {
 
       {/* Tabs */}
       <div className="settings-tabs">
-        {TABS.map(t => (
+        {tabs.map(t => (
           <button key={t.key} className={`settings-tab${activeTab === t.key ? ' active' : ''}`} onClick={() => setActiveTab(t.key)}>
             {t.label}
           </button>
@@ -172,6 +174,13 @@ export default function Settings() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab: Quản trị dịch vụ (chỉ tài khoản quản trị) */}
+      {activeTab === 'admin' && user?.isAdmin && (
+        <div className="settings-tab-content active">
+          <AdminPanel />
         </div>
       )}
 

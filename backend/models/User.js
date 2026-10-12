@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 
+// Mỗi tài khoản là chủ 1 shop (shopId = _id của chính tài khoản).
+// Tài khoản đầu tiên của hệ thống là quản trị dịch vụ (isAdmin): tạo mã mời cho shop mới.
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
@@ -13,9 +15,10 @@ const userSchema = new mongoose.Schema({
   },
   // Mật khẩu đã băm bằng bcrypt — select:false để không bao giờ vô tình trả về
   passwordHash: { type: String, required: true, select: false },
-  // Chỉ cho phép đúng 1 tài khoản: unique index trên giá trị cố định,
-  // nên dù 2 request đăng ký chạy song song thì cũng chỉ 1 cái thành công
-  owner:        { type: String, default: 'owner', unique: true, immutable: true, select: false },
+  shopId:       { type: String, index: true },
+  shopName:     { type: String, default: '', maxlength: 100 },
+  role:         { type: String, enum: ['owner'], default: 'owner' },
+  isAdmin:      { type: Boolean, default: false },
   failedLogins: { type: Number, default: 0, select: false },
   lockUntil:    { type: Date, default: null, select: false },
   // Tăng lên khi "Đăng xuất mọi thiết bị" → mọi JWT cũ mất hiệu lực ngay
@@ -23,11 +26,19 @@ const userSchema = new mongoose.Schema({
   lastLoginAt:  { type: Date, default: null },
 }, { timestamps: true });
 
+// shopId luôn có: tài khoản cũ chưa có thì dùng chính _id
+userSchema.methods.getShopId = function getShopId() {
+  return this.shopId || String(this._id);
+};
+
 // Chỉ trả về các trường an toàn cho frontend
 userSchema.set('toJSON', {
   transform: (doc, ret) => ({
     id:          String(ret._id),
     username:    ret.username,
+    shopId:      ret.shopId || String(ret._id),
+    shopName:    ret.shopName || '',
+    isAdmin:     !!ret.isAdmin,
     createdAt:   ret.createdAt,
     lastLoginAt: ret.lastLoginAt,
   }),
