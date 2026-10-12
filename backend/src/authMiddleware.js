@@ -1,11 +1,9 @@
 const jwt          = require('jsonwebtoken');
-const cookieParser = require('cookie-parser');
 const User         = require('../models/User');
 
 const COOKIE_NAME   = 'cd_session';
 const REMEMBER_DAYS = 30;
 const SESSION_TTL   = '1d';   // Không "ghi nhớ": cookie phiên, token tự hết hạn sau 1 ngày
-const SOCKET_TTL    = '2m';   // Token ngắn hạn chỉ dùng để mở kết nối Socket.io
 
 function getSecret() {
   const secret = process.env.JWT_SECRET;
@@ -60,6 +58,8 @@ async function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Bạn chưa đăng nhập' });
   try {
     req.user = await userFromToken(token, 'session');
+    // Mọi truy vấn dữ liệu đều lọc theo shop của tài khoản đang đăng nhập
+    req.shopId = req.user.getShopId();
     next();
   } catch {
     clearSessionCookie(res);
@@ -77,28 +77,10 @@ function requireAppHeader(req, res, next) {
   next();
 }
 
-function signSocketToken(user) {
-  return jwt.sign({ sub: String(user._id), typ: 'socket', tv: user.tokenVersion || 0 }, getSecret(), {
-    algorithm: 'HS256',
-    expiresIn: SOCKET_TTL,
-  });
-}
-
-// ── Socket.io: chỉ cho kết nối khi đã đăng nhập ───────────
-// Nhận token ngắn hạn (handshake.auth.token) hoặc cookie phiên (cùng domain)
-const parseCookies = cookieParser();
-function socketAuth(socket, next) {
-  parseCookies(socket.request, {}, async () => {
-    try {
-      const authToken = socket.handshake.auth?.token;
-      socket.data.user = authToken
-        ? await userFromToken(authToken, 'socket')
-        : await userFromToken(socket.request.cookies?.[COOKIE_NAME], 'session');
-      next();
-    } catch {
-      next(new Error('unauthorized'));
-    }
-  });
+// Chỉ quản trị dịch vụ (tài khoản đầu tiên) mới tạo được mã mời
+function requireAdmin(req, res, next) {
+  if (!req.user?.isAdmin) return res.status(403).json({ error: 'Chỉ quản trị dịch vụ mới làm được việc này' });
+  next();
 }
 
 module.exports = {
@@ -107,6 +89,5 @@ module.exports = {
   clearSessionCookie,
   requireAuth,
   requireAppHeader,
-  signSocketToken,
-  socketAuth,
+  requireAdmin,
 };

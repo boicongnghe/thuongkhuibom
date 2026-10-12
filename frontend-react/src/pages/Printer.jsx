@@ -2,41 +2,47 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
 import { looksLikeOrder, describePrinter } from '../utils';
+import { agent, isAgent, agentError } from '../agent';
 
 export default function Printer() {
   const { settings, saveSettings, showToast } = useApp();
 
-  const [connType, setConnType]       = useState('ip');
+  const [connType, setConnType]       = useState('usb');
   const [autoPrint, setAutoPrint]     = useState(false);
   const [keywords, setKeywords]       = useState('');
   const [matchCode, setMatchCode]     = useState(true);
   const [matchPhone, setMatchPhone]   = useState(true);
   const [savingRules, setSavingRules] = useState(false);
   const [testText, setTestText]       = useState('');
-  const [ip, setIp]                   = useState('');
-  const [port, setPort]               = useState(9100);
   const [btDevice, setBtDevice]       = useState(null);
   const [btStatus, setBtStatus]       = useState({ connected: false, name: '' });
   const [testing, setTesting]         = useState(false);
   const [printerInfo, setPrinterInfo] = useState({ text: 'Kiểm tra...', ok: null });
+  const [agentOnline, setAgentOnline] = useState(false);
+  const [usbName, setUsbName]         = useState('');
 
   useEffect(() => {
     if (!settings) return;
-    setConnType(settings.printer?.connectionType || 'ip');
+    setConnType(settings.printer?.connectionType === 'bluetooth' ? 'bluetooth' : 'usb');
     setAutoPrint(!!settings.printer?.autoPrint);
     setKeywords(settings.printer?.orderKeywords ?? 'chốt, lấy, mua, đặt');
     setMatchCode(settings.printer?.autoPrintMatchCode !== false);
     setMatchPhone(settings.printer?.autoPrintMatchPhone !== false);
-    setIp(settings.printer?.ip || '');
-    setPort(settings.printer?.port || 9100);
     if (settings.printer?.bluetoothDeviceId) {
       setBtStatus({ connected: true, name: settings.printer.bluetoothDeviceName || '' });
     }
   }, [settings]);
 
+  // Trạng thái máy in USB: app desktop ở shop báo lên dịch vụ
   useEffect(() => {
-    const check = () => api.checkPrinter()
-      .then(d => setPrinterInfo(describePrinter(d)))
+    const check = () => api.getLiveState()
+      .then(({ agent: a }) => {
+        setAgentOnline(!!a.online);
+        setUsbName(a.printer?.printerName || '');
+        setPrinterInfo(describePrinter(a.online
+          ? { ...a.printer, remote: !isAgent, lastSeenSec: a.lastSeenSec }
+          : { status: 'PC_OFFLINE' }));
+      })
       .catch(() => setPrinterInfo({ text: 'Lỗi kiểm tra', ok: false }));
     check();
     const t = setInterval(check, 30000);
@@ -81,18 +87,6 @@ export default function Printer() {
   const testResult = testText.trim()
     ? looksLikeOrder(testText, { keywords, matchCode, matchPhone })
     : null;
-
-  async function saveIPConfig() {
-    const ipRe = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
-    if (!ipRe.test(ip)) { showToast('Địa chỉ IP không hợp lệ', 'error'); return; }
-    if (!port || port < 1 || port > 65535) { showToast('Port không hợp lệ (1–65535)', 'error'); return; }
-    try {
-      await saveSettings({ printer: { ip, port: Number(port) } });
-      showToast('Đã lưu cấu hình IP + Port', 'success');
-    } catch (err) {
-      showToast(`Lỗi: ${err.message}`, 'error');
-    }
-  }
 
   async function connectBluetooth() {
     if (!navigator.bluetooth) { showToast('Trình duyệt không hỗ trợ Web Bluetooth (dùng Chrome/Edge)', 'error', 4000); return; }
@@ -140,11 +134,12 @@ export default function Printer() {
         const data = buildTestEscPos();
         for (let i = 0; i < data.length; i += 128) await ch.writeValueWithoutResponse(data.slice(i, i + 128));
       } else {
-        await api.testPrinterIP(ip, port);
+        if (!isAgent) throw new Error('Hãy bấm "In thử" trong app Chốt Đơn Live trên máy cắm máy in');
+        await agent.testPrint();
       }
       showToast('In thử thành công!', 'success');
     } catch (err) {
-      showToast(`In thử thất bại: ${err.message}`, 'error', 4000);
+      showToast(`In thử thất bại: ${agentError(err)}`, 'error', 5000);
     } finally {
       setTesting(false);
     }
@@ -246,9 +241,9 @@ export default function Printer() {
             {/* Connection type */}
             <div className="setting-section-label">Phương thức kết nối</div>
             <div className="conn-tabs">
-              {['bluetooth', 'ip'].map(t => (
+              {['usb', 'bluetooth'].map(t => (
                 <button key={t} className={`conn-tab${connType === t ? ' active' : ''}`} onClick={() => handleConnTypeChange(t)}>
-                  {t === 'bluetooth' ? 'Bluetooth' : 'IP + Port'}
+                  {t === 'bluetooth' ? 'Bluetooth' : 'USB (app ở shop)'}
                 </button>
               ))}
             </div>
@@ -273,21 +268,26 @@ export default function Printer() {
               </div>
             )}
 
-            {/* IP panel */}
-            {connType === 'ip' && (
+            {/* USB panel: máy in cắm ở máy tính có app Chốt Đơn Live */}
+            {connType === 'usb' && (
               <div className="conn-panel">
-                <div className="form-grid-2">
-                  <div className="form-group">
-                    <label className="form-label">Địa chỉ IP</label>
-                    <input type="text" className="form-input" placeholder="192.168.1.100" value={ip} onChange={e => setIp(e.target.value)} />
+                <div className="bt-status-row">
+                  <div className="bt-status-info">
+                    <span className={`status-dot ${agentOnline && printerInfo.ok ? 'status-on' : 'status-off'}`} />
+                    <div>
+                      <div className="bt-status-label">{agentOnline ? (usbName || 'Chưa chọn máy in') : 'App ở shop chưa mở'}</div>
+                      <div className="bt-device-name">{printerInfo.text}</div>
+                    </div>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Port</label>
-                    <input type="number" className="form-input" placeholder="9100" min="1" max="65535" value={port} onChange={e => setPort(e.target.value)} />
-                  </div>
+                  {isAgent && (
+                    <button className="btn-bt-connect" onClick={() => agent.openSettings()}>Đổi máy in</button>
+                  )}
                 </div>
-                <p className="form-hint">Ví dụ: IP 192.168.1.100 · Port 9100</p>
-                <button className="btn-save-config" onClick={saveIPConfig}>Lưu cấu hình</button>
+                <p className="form-hint">
+                  {isAgent
+                    ? 'Máy in cắm USB vào máy này. Đơn chốt ở bất kỳ thiết bị nào cũng in ra đây.'
+                    : 'Máy in cắm USB vào máy tính ở shop có mở app Chốt Đơn Live. Đơn bạn chốt ở đây sẽ được in ra máy đó.'}
+                </p>
               </div>
             )}
 

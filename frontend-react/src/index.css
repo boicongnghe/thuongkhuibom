@@ -965,3 +965,9 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   .stats-bar .stat-item { padding: 0 8px; }
   .orders-sum { padding: 8px 14px; }
 }
+
+/* Quản trị: mã mời mới */
+.invite-new { margin-top: 14px; padding: 14px; border: 1px dashed var(--primary); border-radius: var(--radius-sm); background: var(--primary-light); display: flex; flex-direction: column; gap: 8px; }
+.invite-code { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 24px; font-weight: 700; letter-spacing: .08em; color: var(--primary-dark); }
+.printed-badge.print-pending { color: #B45309; }
+.printed-badge.print-error { color: #B91C1C; }

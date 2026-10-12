@@ -32,7 +32,6 @@ export const authApi = {
   register: (body) => request('/api/auth/register', { method: 'POST', body }).then(d => d.user),
   logout:   ()     => request('/api/auth/logout', { method: 'POST' }),
   logoutAll: ()    => request('/api/auth/logout-all', { method: 'POST' }),
-  socketToken: ()  => request('/api/auth/socket-token'),
   // Trả về user nếu còn đăng nhập, null nếu chưa / hết phiên
   me: async () => {
     try {

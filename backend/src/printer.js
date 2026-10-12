@@ -144,8 +144,11 @@ async function printComment(data) {
   console.log('[Printer] Bắt đầu in...');
 
   const displayName = data.displayName || data.username || '';
+  // Tên shop lấy từ cài đặt trên dịch vụ trung tâm (app desktop truyền vào), bỏ dấu cho máy in
+  const shopName = wrapText(data.shopName || SHOP_NAME)[0] || '';
   const textLines = [
-    centerLine(SHOP_NAME),
+    centerLine(shopName),
+    ...(data.reprint ? [centerLine('*** IN LAI ***')] : []),
     DIVIDER,
     ...wrapText(`Ten: ${displayName}`),
     ...wrapText(`@${data.username || ''}`),
@@ -200,4 +203,9 @@ function getPrinterInfo() {
   return { printerName: PRINTER_NAME, printerWidth: PRINTER_WIDTH, lineWidth: LINE_WIDTH };
 }
 
-module.exports = { printComment, checkPrinter, getPrinterInfo, buildTestEscPos };
+// In trang thử (app desktop: nút "In thử")
+async function printTest() {
+  await sendToPrinter(buildTestEscPos());
+}
+
+module.exports = { printComment, printTest, checkPrinter, getPrinterInfo, buildTestEscPos };

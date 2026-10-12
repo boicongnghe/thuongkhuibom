@@ -65,10 +65,13 @@ export default function AuthPage({ onAuthenticated }) {
   const [error, setError]       = useState('');
   const [notice, setNotice]     = useState('');
   const [serverDown, setServerDown] = useState(false);
+  const [needsInvite, setNeedsInvite] = useState(true);
+  const [inviteCode, setInviteCode] = useState('');
+  const [shopName, setShopName]   = useState('');
   const [checking, setChecking] = useState(true);
   const submitting = useRef(false);
 
-  // Chưa có tài khoản nào → mở sẵn tab Đăng ký; đã có → ẩn hẳn tab Đăng ký
+  // Dịch vụ nhiều shop: tài khoản đầu tiên là quản trị; shop sau đăng ký bằng mã mời
   async function checkStatus() {
     setChecking(true);
     try {
@@ -76,11 +79,11 @@ export default function AuthPage({ onAuthenticated }) {
       if (typeof res?.registrationOpen !== 'boolean') throw new Error('bad response');
       setServerDown(false);
       setRegistrationOpen(res.registrationOpen);
-      if (res.registrationOpen) {
+      setNeedsInvite(!!res.needsInvite);
+      if (res.firstUser) {
         setTab('register');
-        setNotice('Chưa có tài khoản. Hãy tạo tài khoản đầu tiên — sau đó chức năng đăng ký sẽ tự khoá.');
+        setNotice('Dịch vụ chưa có tài khoản nào. Tài khoản bạn tạo bây giờ là tài khoản QUẢN TRỊ (tạo mã mời cho các shop khác).');
       } else {
-        setTab('login');
         setNotice('');
       }
     } catch (err) {
@@ -113,7 +116,8 @@ export default function AuthPage({ onAuthenticated }) {
     const name = username.trim().toLowerCase();
     if (isRegister) {
       const invalid = validateUsername(name) || validatePassword(password)
-        || (password !== confirm ? 'Mật khẩu nhập lại không khớp' : null);
+        || (password !== confirm ? 'Mật khẩu nhập lại không khớp' : null)
+        || (needsInvite && !inviteCode.trim() ? 'Nhập mã mời do người cung cấp dịch vụ gửi cho bạn' : null);
       if (invalid) { setError(invalid); return; }
     } else if (!name || !password) {
       setError('Vui lòng nhập tên đăng nhập và mật khẩu');
@@ -124,18 +128,15 @@ export default function AuthPage({ onAuthenticated }) {
     setLoading(true);
     try {
       const body = { username: name, password, remember };
-      const user = isRegister ? await authApi.register(body) : await authApi.login(body);
+      const user = isRegister
+        ? await authApi.register({ ...body, inviteCode: inviteCode.trim(), shopName: shopName.trim() })
+        : await authApi.login(body);
       setRememberedUsername(remember ? name : '');
       setPassword('');
       setConfirm('');
       onAuthenticated(user);
     } catch (err) {
       setError(err.message);
-      // Đăng ký thất bại vì đã có tài khoản → chuyển về đăng nhập
-      if (err.status === 403 && isRegister) {
-        setRegistrationOpen(false);
-        setTab('login');
-      }
     } finally {
       submitting.current = false;
       setLoading(false);
@@ -149,7 +150,7 @@ export default function AuthPage({ onAuthenticated }) {
           <div className="auth-logo" aria-hidden="true">C</div>
           <div>
             <h1>Chốt Đơn Live</h1>
-            <p>{isRegister ? 'Tạo tài khoản quản lý shop' : 'Đăng nhập để tiếp tục'}</p>
+            <p>{isRegister ? 'Đăng ký shop mới' : 'Đăng nhập để tiếp tục'}</p>
           </div>
         </div>
 
@@ -190,6 +191,39 @@ export default function AuthPage({ onAuthenticated }) {
           )}
           {notice && !error && <div className="auth-msg auth-msg-info" role="status">{notice}</div>}
           {error && <div className="auth-msg auth-msg-error" role="alert">{error}</div>}
+
+          {isRegister && needsInvite && (
+            <div className="auth-field">
+              <label htmlFor="auth-invite">Mã mời</label>
+              <input
+                id="auth-invite"
+                type="text"
+                value={inviteCode}
+                onChange={e => setInviteCode(e.target.value.toUpperCase())}
+                placeholder="CD-XXXX-XXXX"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                maxLength={20}
+                aria-describedby="hint-invite"
+                required
+              />
+              <small id="hint-invite">Người cung cấp dịch vụ gửi cho bạn. Mỗi mã dùng cho 1 shop.</small>
+            </div>
+          )}
+          {isRegister && (
+            <div className="auth-field">
+              <label htmlFor="auth-shop">Tên shop</label>
+              <input
+                id="auth-shop"
+                type="text"
+                value={shopName}
+                onChange={e => setShopName(e.target.value)}
+                placeholder="Shop của bạn"
+                maxLength={100}
+              />
+            </div>
+          )}
 
           <div className="auth-field">
             <label htmlFor="auth-username">Tên đăng nhập</label>

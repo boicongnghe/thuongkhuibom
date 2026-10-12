@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
 import { api } from '../api';
-import socket from '../socket';
 import { formatCurrency, formatDate, formatDateTime, getInitials } from '../utils';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
@@ -43,15 +42,11 @@ export default function Customers() {
 
   useEffect(() => { loadAll(); }, []);
 
-  // Sửa khách / chốt đơn ở thiết bị khác → tải lại danh sách
+  // Sửa khách / chốt đơn ở thiết bị khác → tải lại khi quay lại cửa sổ
   useEffect(() => {
-    const reload = () => loadAll();
-    socket.on('customer:updated', reload);
-    socket.on('order:saved', reload);
-    return () => {
-      socket.off('customer:updated', reload);
-      socket.off('order:saved', reload);
-    };
+    const onVisible = () => { if (document.visibilityState === 'visible') loadAll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [sort]);
   useEffect(() => { applySort(all, sort); }, [sort]);
 

@@ -6,7 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import Modal from '../components/Modal';
 import { useApp } from '../context/AppContext';
-import socket from '../socket';
+import { isAgent, liveBus } from '../agent';
 
 const STATUS_FILTERS = ['all', 'pending', 'deposit', 'confirmed', 'shipping', 'completed', 'cancelled'];
 // Giống backend: đơn Hoàn thành / Đã huỷ không sửa được số tiền
@@ -49,18 +49,29 @@ export default function Orders() {
 
   useEffect(() => { load(); }, [page, status, search]);
 
-  // Realtime: refresh when status changes
+  // Cập nhật thay đổi từ thiết bị khác: tự tải lại mỗi 10 giây và khi quay lại cửa sổ
   useEffect(() => {
-    function onStatusChanged() { load(); }
-    socket.on('order:status_changed', onStatusChanged);
-    socket.on('order:saved', onStatusChanged);
-    socket.on('order:updated', onStatusChanged);   // sửa tiền / tạo đơn ở thiết bị khác
-    return () => {
-      socket.off('order:status_changed', onStatusChanged);
-      socket.off('order:saved', onStatusChanged);
-      socket.off('order:updated', onStatusChanged);
-    };
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 10000);
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
   }, [page, status, search]);
+
+  // In / in lại phiếu: vào hàng đợi in, app desktop ở shop in ra
+  async function printOrder(o) {
+    if (busyOrderId) return;
+    setBusyOrderId(o._id);
+    try {
+      await api.reprintOrder(o._id);
+      if (isAgent) liveBus.emit('print-now');
+      showToast(`Đã gửi lệnh in ${o.orderNumber}`, 'info');
+      load();
+    } catch (err) {
+      showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setBusyOrderId(null);
+    }
+  }
 
   function handleSearch(val) {
     setSearchInput(val);
@@ -222,8 +233,13 @@ export default function Orders() {
                                 {STATUS_LABELS[s]?.label}
                               </button>
                             ))
-                          : <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>—</span>
+                          : null
                         }
+                        <button className="btn-status-change" disabled={busyOrderId === o._id || o.printPending}
+                          onClick={() => printOrder(o)}
+                          title={o.printError ? `In lỗi: ${o.printError}` : o.printedAt ? 'Đã in — bấm để in lại' : 'In phiếu'}>
+                          {o.printPending ? '⏳ Chờ in' : o.printError ? '⚠ In lại' : o.printedAt ? '🖨 In lại' : '🖨 In'}
+                        </button>
                       </td>
                     </tr>
                   );
