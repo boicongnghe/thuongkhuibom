@@ -21,28 +21,14 @@ App desktop ở mỗi shop (desktop/, Electron)
 3. Redeploy. Ở lần chạy đầu tiên, dịch vụ **tự chuyển dữ liệu cũ** sang dạng nhiều shop: tài khoản cũ thành **quản trị**, toàn bộ đơn, khách và cài đặt cũ được gán cho shop của bạn.
 4. ⚠️ Gói Vercel **Hobby (miễn phí) chỉ dành cho mục đích phi thương mại**. Nếu thu phí các shop, bạn cần gói **Pro**. Hãy xem điều khoản hiện hành của Vercel.
 
-## 2. Ra bản app desktop mới (các shop tự cập nhật)
+## 2. Ra bản app desktop mới
 
 Phần lớn thay đổi (giao diện, thống kê, dồn đơn...) nằm trên web: **push code là mọi shop có ngay**, không cần app mới.
-Chỉ khi sửa phần chạy trong máy (`desktop/`, `backend/src/tiktok.js`, `backend/src/printer.js`) mới cần ra bản app mới.
+Chỉ khi sửa phần chạy trong máy (`desktop/`, `backend/src/tiktok.js`, `backend/src/printer.js`) mới cần ra bản app mới:
 
-**Chuẩn bị 1 lần:**
-1. Trên GitHub, tạo repo **công khai** `boicongnghe/chotdon-releases`. Repo này để trống, chỉ dùng để chứa file cài. Code chính vẫn để riêng tư.
-2. Tạo token: GitHub → Settings → Developer settings → **Fine-grained tokens** → chọn repo `chotdon-releases` → quyền **Contents: Read and write**. Lưu token ở chỗ an toàn, **không** đưa vào code.
-3. Ở **Quản trị dịch vụ → Link tải app**, đặt link cố định (từ đó về sau không phải đổi nữa):
-   `https://github.com/boicongnghe/chotdon-releases/releases/latest/download/ChotDonLive-Setup.exe`
-
-**Mỗi lần ra bản mới:**
-1. Tăng `"version"` trong `package.json` (ví dụ `1.0.3` → `1.0.4`).
-2. Chạy:
-   ```powershell
-   $env:GH_TOKEN = "token_cua_ban"
-   npm run release:win
-   ```
-   Lệnh này build file cài và **đăng lên GitHub Releases** (kèm `latest.yml` để app tự cập nhật).
-3. Xong. App ở các shop tự kiểm tra cập nhật khi mở và cứ 4 tiếng một lần, rồi **tải ngầm**. Tải xong thì:
-   - **Không** đang Live: hỏi "Khởi động lại để cập nhật?".
-   - **Đang** Live: không làm phiền, tự cập nhật khi tắt app. Trên menu khay cũng có nút **⬆ Cập nhật lên bản …**.
+1. Tăng `"version"` trong `package.json`.
+2. Build: `npx electron-builder --win --x64` → file `releaseChotDonLive-Setup-<version>.exe`.
+3. Tải file lên Google Drive, rồi thay link ở **Quản trị dịch vụ → Link tải app**. Báo các shop tải về và cài đè lên bản cũ; cấu hình và đăng nhập vẫn giữ nguyên.
 4. Cột **App ở shop** trong danh sách shop cho biết shop nào đã lên bản mới.
 
 Địa chỉ dịch vụ mặc định của app nằm ở `desktop/defaults.json` (hiện là `https://chotgo.vercel.app`).
