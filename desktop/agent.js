@@ -85,6 +85,13 @@ async function printerStatus(force = false) {
 // In tuần tự: 2 việc in tới cùng lúc không bị chen dòng vào nhau
 let printChain = Promise.resolve();
 function print(job) {
+  // Phiếu dạng bảng (phiếu tổng, đi đơn, tổng kết ngày)
+  if (job.kind === 'report') {
+    const runReport = () => mods().printer.printReport(job);
+    const pr = printChain.then(runReport, runReport);
+    printChain = pr.catch(() => {});
+    return pr;
+  }
   const run = () => mods().printer.printComment({
     username:    job.username,
     displayName: job.displayName,

@@ -203,9 +203,43 @@ function getPrinterInfo() {
   return { printerName: PRINTER_NAME, printerWidth: PRINTER_WIDTH, lineWidth: LINE_WIDTH };
 }
 
+// Bỏ dấu tiếng Việt cho máy in (máy in nhiệt không có font tiếng Việt)
+function toAscii(text) {
+  return String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
+// 1 dòng 2 cột: chữ bên trái, số tiền căn phải; trái dài quá thì xuống dòng
+function twoCol(left, right) {
+  const l = toAscii(left).trim();
+  const r = toAscii(right).trim();
+  if (!r) return wrapText(l);
+  if (l.length + 1 + r.length <= LINE_WIDTH) return [l + ' '.repeat(LINE_WIDTH - l.length - r.length) + r];
+  return [...wrapText(l), ' '.repeat(Math.max(0, LINE_WIDTH - r.length)) + r];
+}
+
+/**
+ * In phiếu dạng bảng: phiếu tổng của khách, phiếu đi đơn, tổng kết ngày.
+ * @param {{ shopName, title, subtitle, rows: [{left, right, divider}], footer: string[] }} data
+ */
+async function printReport(data) {
+  const lines = [
+    centerLine(wrapText(data.shopName || SHOP_NAME)[0] || ''),
+    ...wrapText(data.title || '').map(centerLine),
+    ...(data.subtitle ? wrapText(data.subtitle) : []),
+    DIVIDER,
+  ];
+  for (const r of data.rows || []) {
+    if (r.divider) lines.push('-'.repeat(LINE_WIDTH));
+    else lines.push(...twoCol(r.left, r.right));
+  }
+  lines.push(DIVIDER);
+  for (const f of data.footer || []) lines.push(...wrapText(f));
+  await sendToPrinter(buildEscPos(lines));
+}
+
 // In trang thử (app desktop: nút "In thử")
 async function printTest() {
   await sendToPrinter(buildTestEscPos());
 }
 
-module.exports = { printComment, printTest, checkPrinter, getPrinterInfo, buildTestEscPos };
+module.exports = { printComment, printReport, printTest, checkPrinter, getPrinterInfo, buildTestEscPos, _twoCol: twoCol };

@@ -8,6 +8,8 @@ const HEARTBEAT_MS = 10000;   // báo trạng thái máy in / TikTok lên dịch
 const RECONCILE_MS = 3000;    // kiểm tra lệnh Live (từ điện thoại...) và làm theo
 const PRINT_POLL_MS = 2000;   // hỏi hàng đợi in
 const RETRY_AFTER_FAIL_MS = 30000;
+// App desktop cũ (1.0.1) chỉ in được phiếu đơn; bản mới khai báo thêm 'report' (phiếu tổng, đi đơn...)
+const PRINT_KINDS = agent?.features || ['order'];
 
 /**
  * Chạy ngầm khi trang mở trong app desktop ở shop (không hiện gì ra màn hình):
@@ -155,18 +157,21 @@ export default function AgentRunner() {
       printing = true;
       try {
         for (let i = 0; i < 20 && alive; i++) {      // in tối đa 20 phiếu mỗi lượt, lượt sau in tiếp
-          const { job } = await api.claimPrintJob();
+          const { job } = await api.claimPrintJob(PRINT_KINDS);
           if (!job) break;
+          const isReport = job.kind === 'report';
+          const id = isReport ? job.jobId : job.orderId;
+          const label = isReport ? job.title : job.orderNumber;
           try {
             await agent.print(job);
-            await api.finishPrintJob(job.orderId, true);
-            liveBus.emit('printed', { orderId: job.orderId, ok: true });
-            toast(`Đã in ${job.orderNumber}`, 'success');
+            await api.finishPrintJob(id, true, '', job.kind);
+            liveBus.emit('printed', { orderId: id, ok: true, kind: job.kind });
+            toast(`Đã in ${label}`, 'success');
           } catch (err) {
             const msg = agentError(err);
-            await api.finishPrintJob(job.orderId, false, msg).catch(() => {});
-            liveBus.emit('printed', { orderId: job.orderId, ok: false, error: msg });
-            toast(`In lỗi ${job.orderNumber}: ${msg}. Bấm "In lại" khi máy in sẵn sàng.`, 'error', 6000);
+            await api.finishPrintJob(id, false, msg, job.kind).catch(() => {});
+            liveBus.emit('printed', { orderId: id, ok: false, error: msg, kind: job.kind });
+            toast(`In lỗi ${label}: ${msg}. Bấm in lại khi máy in sẵn sàng.`, 'error', 6000);
             report();
             break;   // máy in đang lỗi: dừng lượt này, lần sau thử tiếp
           }

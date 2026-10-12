@@ -53,6 +53,10 @@ const customerSchema = new mongoose.Schema({
   notes:         { type: String, default: '' },
   firstSeen:     { type: Date, default: Date.now },
   lastSeen:      { type: Date, default: Date.now },
+  // Dồn đơn: khách cọc 1 khoản cho cả nhóm đơn chưa đi → được giữ hàng, không bị tính hạn cọc
+  holdDeposit:    { type: Number, default: 0, min: 0 },
+  holdDepositAt:  { type: Date, default: null },
+  forfeitedTotal: { type: Number, default: 0 },   // tổng tiền khách đã mất cọc (bị xả hàng khi đã cọc)
 });
 // Cùng 1 người TikTok có thể là khách của nhiều shop → unique theo (shop, tiktokUserId)
 customerSchema.index({ shopId: 1, tiktokUserId: 1 }, { unique: true });
@@ -91,6 +95,13 @@ const orderSchema = new mongoose.Schema({
   printedAt:        { type: Date, default: null },
   printError:       { type: String, default: null },
   printCount:       { type: Number, default: 0 },
+  // Xả hàng (huỷ vì không cọc / bỏ đơn) + tiền cọc bị mất của đơn này
+  cancelReason:     { type: String, default: null },     // 'xa_hang' | null
+  releasedAt:       { type: Date, default: null },
+  forfeitedDeposit: { type: Number, default: 0 },
+  // Đi đơn: thuộc phiếu đi đơn nào
+  shipmentId:       { type: String, default: null },
+  shippedAt:        { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
@@ -99,6 +110,8 @@ orderSchema.index({ shopId: 1, tiktokUserId: 1, createdAt: -1 });
 orderSchema.index({ shopId: 1, sessionId: 1, createdAt: -1 });
 orderSchema.index({ shopId: 1, createdAt: -1 });
 orderSchema.index({ shopId: 1, printPending: 1, printRequestedAt: 1 });
+orderSchema.index({ shopId: 1, status: 1, tiktokUserId: 1, createdAt: 1 });
+orderSchema.index({ shopId: 1, releasedAt: -1 });
 // Mỗi bình luận chỉ tạo được 1 đơn (commentId là ObjectId duy nhất toàn hệ thống)
 orderSchema.index(
   { commentId: 1 },
@@ -125,6 +138,44 @@ const pcStatusSchema = new mongoose.Schema({
 }, { minimize: false });
 const PcStatus = mongoose.model('PcStatus', pcStatusSchema);
 
+// Phiếu đi đơn: gom nhiều đơn của 1 khách đi cùng lúc
+const shipmentSchema = new mongoose.Schema({
+  shopId:         { type: String, required: true },
+  code:           { type: String, required: true },
+  tiktokUserId:   { type: String, required: true },
+  username:       { type: String, default: '' },
+  displayName:    { type: String, default: '' },
+  phone:          { type: String, default: '' },
+  orderIds:       [{ type: String }],
+  orderCount:     { type: Number, default: 0 },
+  amount:         { type: Number, default: 0 },   // tổng tiền hàng
+  depositApplied: { type: Number, default: 0 },   // cọc được trừ (cọc từng đơn + cọc dồn đơn)
+  cod:            { type: Number, default: 0 },   // còn phải thu khi giao
+  createdBy:      { type: String, default: '' },
+  createdAt:      { type: Date, default: Date.now },
+});
+shipmentSchema.index({ shopId: 1, createdAt: -1 });
+shipmentSchema.index({ shopId: 1, code: 1 }, { unique: true });
+const Shipment = mongoose.model('Shipment', shipmentSchema);
+
+// Phiếu in dạng bảng (phiếu tổng của khách, phiếu đi đơn, tổng kết ngày) — app ở shop in ra
+const printJobSchema = new mongoose.Schema({
+  shopId:           { type: String, required: true },
+  title:            { type: String, default: '' },
+  subtitle:         { type: String, default: '' },
+  rows:             [{ left: String, right: String, divider: Boolean, _id: false }],
+  footer:           [{ type: String }],
+  ref:              { type: String, default: '' },
+  printPending:     { type: Boolean, default: true },
+  printRequestedAt: { type: Date, default: Date.now },
+  printClaimAt:     { type: Date, default: null },
+  printedAt:        { type: Date, default: null },
+  printError:       { type: String, default: null },
+  createdAt:        { type: Date, default: Date.now },
+});
+printJobSchema.index({ shopId: 1, printPending: 1, printRequestedAt: 1 });
+const PrintJob = mongoose.model('PrintJob', printJobSchema);
+
 // ── Order number sequence ─────────────────────────────────
 function _todayYmd() {
   // sv-SE cho định dạng YYYY-MM-DD; cố định múi giờ VN để không lệch ngày khi server ở nơi khác
@@ -149,6 +200,13 @@ async function _nextOrderNumber(shopId, prefix) {
   }
   const { seq } = await Counter.findByIdAndUpdate(key, { $inc: { seq: 1 } }, { upsert: true, new: true }).lean();
   return `${prefix || 'ORD'}-${ymd}-${String(seq).padStart(3, '0')}`;
+}
+
+// Mã theo ngày cho loại khác (vd phiếu đi đơn "DI-20261012-001")
+async function nextDailyCode(shopId, kind, prefix) {
+  const ymd = _todayYmd();
+  const { seq } = await Counter.findByIdAndUpdate(`${shopId}:${kind}-${ymd}`, { $inc: { seq: 1 } }, { upsert: true, new: true }).lean();
+  return `${prefix}-${ymd}-${String(seq).padStart(3, '0')}`;
 }
 
 // ── Connect + chuyển dữ liệu cũ (1 shop) sang dạng nhiều shop ─
@@ -444,10 +502,49 @@ async function requestPrint(shopId, orderId) {
   return order;
 }
 
-/** App desktop nhận 1 việc in (nguyên tử: 2 app cùng shop không in trùng). */
-async function claimPrintJob(shopId) {
+/**
+ * App desktop nhận 1 việc in (nguyên tử: 2 app cùng shop không in trùng).
+ * kinds: loại phiếu app in được — app cũ chỉ in được 'order'.
+ * @returns {null | { kind: 'order', order } | { kind: 'report', job }}
+ */
+async function claimPrintJob(shopId, { kinds = ['order'] } = {}) {
   requireShop(shopId);
   const now = Date.now();
+  if (kinds.includes('order')) {
+    const order = await claimOrderPrint(shopId, now);
+    if (order) return { kind: 'order', order };
+  }
+  if (kinds.includes('report')) {
+    const job = await PrintJob.findOneAndUpdate(
+      {
+        shopId,
+        printPending: true,
+        printRequestedAt: { $gte: new Date(now - PRINT_QUEUE_MAX_AGE_MS) },
+        $or: [{ printClaimAt: null }, { printClaimAt: { $lt: new Date(now - PRINT_CLAIM_TIMEOUT_MS) } }],
+      },
+      { $set: { printClaimAt: new Date(now) } },
+      { sort: { printRequestedAt: 1 }, new: true },
+    ).lean();
+    if (job) return { kind: 'report', job };
+  }
+  return null;
+}
+
+async function finishReportJob(shopId, jobId, { ok, error } = {}) {
+  const update = ok
+    ? { $set: { printPending: false, printClaimAt: null, printedAt: new Date(), printError: null } }
+    : { $set: { printPending: false, printClaimAt: null, printError: String(error || 'Lỗi in').slice(0, 300) } };
+  const job = await PrintJob.findOneAndUpdate({ _id: jobId, shopId: requireShop(shopId) }, update, { new: true }).lean();
+  if (!job) throw businessError('Không tìm thấy phiếu in', 404);
+  return job;
+}
+
+async function createPrintJob(shopId, { title, subtitle, rows, footer, ref }) {
+  const job = await PrintJob.create({ shopId: requireShop(shopId), title, subtitle, rows, footer, ref });
+  return job.toObject();
+}
+
+async function claimOrderPrint(shopId, now) {
   const order = await Order.findOneAndUpdate(
     {
       shopId,
@@ -818,7 +915,8 @@ module.exports = {
   createSession, endSession, getLatestSessionId, getSession,
   saveComments, getCommentById, getRecentComments,
   createOrder, createOrderFromComment, getOrderByCommentId, getOrderById,
-  requestPrint, claimPrintJob, finishPrintJob,
+  requestPrint, claimPrintJob, finishPrintJob, finishReportJob, createPrintJob,
+  Shipment, PrintJob, Counter, requireShop, nextDailyCode,
   getOrders, updateOrderStatus, updateOrderAmount, getOrderSummary,
   getAllCustomers, getCustomerByTiktokId, getCustomerComments, getCustomerOrders,
   updateCustomer, searchCustomers,

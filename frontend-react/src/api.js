@@ -58,8 +58,20 @@ export const api = {
   updateOrderAmount: (id, body)          => put(`/api/orders/${id}/amount`, body),
 
   // Hàng đợi in (chỉ app desktop dùng)
-  claimPrintJob: ()                      => post('/api/print-queue/claim'),
-  finishPrintJob: (id, ok, error = '')   => post(`/api/print-queue/${id}/done`, { ok, error }),
+  claimPrintJob: (kinds = ['order'])     => post('/api/print-queue/claim', { kinds }),
+  finishPrintJob: (id, ok, error = '', kind = 'order') => post(`/api/print-queue/${id}/done`, { ok, error, kind }),
+
+  // Dồn đơn · xả hàng · đi đơn · theo ngày
+  getHolds: (search = '')                => request(`/api/holds?search=${encodeURIComponent(search)}`),
+  setHoldDeposit: (userId, amount)       => put(`/api/holds/${encodeURIComponent(userId)}/deposit`, { amount }),
+  releaseHold: (userId, orderIds)        => post(`/api/holds/${encodeURIComponent(userId)}/release`, orderIds ? { orderIds } : {}),
+  releaseOverdue: ()                     => post('/api/holds/release-overdue'),
+  printHoldSummary: (userId, orderIds)   => post(`/api/holds/${encodeURIComponent(userId)}/print`, orderIds ? { orderIds } : {}),
+  createShipment: (body)                 => post('/api/shipments', body),
+  getShipments: (date)                   => request(`/api/shipments${date ? `?date=${date}` : ''}`),
+  reprintShipment: (id)                  => post(`/api/shipments/${id}/print`),
+  getDaily: (date)                       => request(`/api/customers/daily?date=${date}`),
+  printDaily: (date)                     => post('/api/customers/daily/print', { date }),
 
   // Customers
   getCustomers: ()                       => request('/api/customers'),

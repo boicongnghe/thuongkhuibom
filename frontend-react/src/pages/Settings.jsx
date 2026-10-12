@@ -36,6 +36,7 @@ export default function Settings() {
   const [timezone, setTimezone]           = useState('Asia/Ho_Chi_Minh');
   const [currency, setCurrency]           = useState('VND');
   const [orderPrefix, setOrderPrefix]     = useState('ORD');
+  const [deadlineHours, setDeadlineHours] = useState(24);
   const [savingSystem, setSavingSystem]   = useState(false);
 
   useEffect(() => {
@@ -46,6 +47,7 @@ export default function Settings() {
     setTimezone(settings.system?.timezone || 'Asia/Ho_Chi_Minh');
     setCurrency(settings.system?.currency || 'VND');
     setOrderPrefix(settings.system?.orderPrefix || 'ORD');
+    setDeadlineHours(settings.system?.depositDeadlineHours || 24);
   }, [settings]);
 
   function startEdit() {
@@ -100,7 +102,12 @@ export default function Settings() {
   async function saveSystem() {
     setSavingSystem(true);
     try {
-      await saveSettings({ system: { autoConfirmDeposit: autoDeposit, timezone, currency, orderPrefix: orderPrefix.toUpperCase() || 'ORD' } });
+      const hours = Math.round(Number(deadlineHours));
+      if (!Number.isInteger(hours) || hours < 1 || hours > 720) {
+        showToast('Hạn cọc phải từ 1 đến 720 giờ', 'error');
+        return;
+      }
+      await saveSettings({ system: { autoConfirmDeposit: autoDeposit, timezone, currency, orderPrefix: orderPrefix.toUpperCase() || 'ORD', depositDeadlineHours: hours } });
       showToast('Đã lưu cài đặt hệ thống', 'success');
     } catch (err) {
       showToast(`Lỗi: ${err.message}`, 'error');
@@ -230,6 +237,12 @@ export default function Settings() {
                       <option value="VND">VND (₫)</option>
                       <option value="USD">USD ($)</option>
                     </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="deadline-hours">Hạn cọc dồn đơn (giờ)</label>
+                    <input id="deadline-hours" type="number" className="form-input" min={1} max={720}
+                      value={deadlineHours} onChange={e => setDeadlineHours(e.target.value)} />
+                    <span className="form-hint">Khách chưa cọc quá số giờ này kể từ đơn đầu → báo "Quá hạn cọc, cần xả hàng".</span>
                   </div>
                   <div className="form-group">
                     <label className="form-label">Tiền tố mã đơn</label>

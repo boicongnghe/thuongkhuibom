@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const helmet       = require('helmet');
 
 const db          = require('./src/database');
+const holds       = require('./src/holds');
 const settings    = require('./src/settings');
 const authRoutes  = require('./src/authRoutes');
 const User        = require('./models/User');
@@ -373,11 +374,25 @@ function createApp() {
   // Hàng đợi in — chỉ app desktop ở shop gọi
   // ══════════════════════════════════════════════════════
   app.post('/api/print-queue/claim', handle('print-queue claim', async (req, res) => {
-    const order = await db.claimPrintJob(req.shopId);
-    if (!order) return res.json({ job: null });
+    // App cũ không gửi kinds → chỉ nhận phiếu đơn (không in nhầm phiếu tổng)
+    const kinds = Array.isArray(req.body?.kinds) ? req.body.kinds.filter(k => ['order', 'report'].includes(k)) : ['order'];
+    const claimed = await db.claimPrintJob(req.shopId, { kinds: kinds.length ? kinds : ['order'] });
+    if (!claimed) return res.json({ job: null });
     const s = await settings.load(req.shopId);
+    const shopName = s.storeInfo?.storeName || req.user.shopName || '';
+    if (claimed.kind === 'report') {
+      const j = claimed.job;
+      return res.json({
+        job: {
+          kind: 'report', jobId: String(j._id), title: j.title, subtitle: j.subtitle,
+          rows: j.rows, footer: j.footer, shopName,
+        },
+      });
+    }
+    const order = claimed.order;
     res.json({
       job: {
+        kind:        'order',
         orderId:     String(order._id),
         orderNumber: order.orderNumber,
         username:    order.username,
@@ -392,11 +407,95 @@ function createApp() {
 
   app.post('/api/print-queue/:id/done', handle('print-queue done', async (req, res) => {
     if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'ID đơn hàng không hợp lệ' });
+    if (req.body?.kind === 'report') {
+      const job = await db.finishReportJob(req.shopId, req.params.id, { ok: req.body?.ok === true, error: sanitizeStr(req.body?.error, 300) });
+      return res.json({ ok: true, printedAt: job.printedAt, printError: job.printError });
+    }
     const order = await db.finishPrintJob(req.shopId, req.params.id, {
       ok: req.body?.ok === true,
       error: sanitizeStr(req.body?.error, 300),
     });
     res.json({ ok: true, printedAt: order.printedAt, printError: order.printError });
+  }));
+
+  // ══════════════════════════════════════════════════════
+  // Dồn đơn · xả hàng · đi đơn · thống kê theo ngày
+  // ══════════════════════════════════════════════════════
+  const amountOf = (v) => parseAmount(v === undefined ? 0 : v);
+  const idList = (v) => (Array.isArray(v) ? v.filter(isValidObjectId).slice(0, 200) : null);
+
+  app.get('/api/holds', handle('holds', async (req, res) => {
+    const s = await settings.load(req.shopId);
+    res.json(await holds.getHolds(req.shopId, { search: sanitizeStr(req.query.search, 100), settings: s }));
+  }));
+
+  app.put('/api/holds/:userId/deposit', handle('holds deposit', async (req, res) => {
+    const amount = amountOf(req.body?.amount);
+    if (Number.isNaN(amount)) return res.status(400).json({ error: 'Tiền cọc phải là số nguyên từ 0 đến 1 tỷ' });
+    res.json(await holds.setHoldDeposit(req.shopId, sanitizeStr(req.params.userId, 100), amount));
+  }));
+
+  app.post('/api/holds/:userId/release', handle('holds release', async (req, res) => {
+    const orderIds = req.body?.orderIds === undefined ? null : idList(req.body.orderIds);
+    if (orderIds && !orderIds.length) return res.status(400).json({ error: 'Chưa chọn đơn nào' });
+    res.json(await holds.releaseHold(req.shopId, sanitizeStr(req.params.userId, 100), { orderIds, by: req.user.username }));
+  }));
+
+  app.post('/api/holds/release-overdue', handle('holds release-overdue', async (req, res) => {
+    const s = await settings.load(req.shopId);
+    res.json(await holds.releaseOverdue(req.shopId, { settings: s, by: req.user.username }));
+  }));
+
+  // In phiếu tổng của khách (các đơn đã chọn, không đổi trạng thái)
+  app.post('/api/holds/:userId/print', handle('holds print', async (req, res) => {
+    const userId = sanitizeStr(req.params.userId, 100);
+    const orderIds = req.body?.orderIds === undefined ? undefined : idList(req.body.orderIds);
+    const orders = await holds.heldOrdersOf(req.shopId, userId, orderIds || undefined);
+    if (!orders.length) return res.status(400).json({ error: 'Không có đơn nào để in' });
+    const customer = (await db.getCustomerByTiktokId(req.shopId, userId)) || { username: orders[0].username };
+    const holdDeposit = orderIds ? 0 : customer.holdDeposit || 0;
+    const job = await db.createPrintJob(req.shopId, { ...holds.customerSummaryReport(customer, orders, holdDeposit), ref: `summary:${userId}` });
+    res.status(201).json({ ok: true, jobId: String(job._id) });
+  }));
+
+  app.post('/api/shipments', handle('shipments create', async (req, res) => {
+    const userId = sanitizeStr(req.body?.tiktokUserId, 100);
+    const orderIds = idList(req.body?.orderIds);
+    if (!userId || !orderIds?.length) return res.status(400).json({ error: 'Chưa chọn khách hoặc đơn để đi' });
+    let useHoldDeposit;
+    if (req.body?.useHoldDeposit !== undefined) {
+      useHoldDeposit = amountOf(req.body.useHoldDeposit);
+      if (Number.isNaN(useHoldDeposit)) return res.status(400).json({ error: 'Tiền cọc trừ không hợp lệ' });
+    }
+    const { shipment, orders } = await holds.shipOrders(req.shopId, userId, orderIds, { useHoldDeposit, by: req.user.username });
+    if (req.body?.print !== false) {
+      await db.createPrintJob(req.shopId, { ...holds.shipmentReport(shipment, orders), ref: `shipment:${shipment._id}` });
+    }
+    res.status(201).json({ shipment });
+  }));
+
+  app.get('/api/shipments', handle('shipments', async (req, res) => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : undefined;
+    res.json(await holds.getShipments(req.shopId, { date }));
+  }));
+
+  app.post('/api/shipments/:id/print', handle('shipments print', async (req, res) => {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'ID phiếu không hợp lệ' });
+    const shipment = await db.Shipment.findOne({ _id: req.params.id, shopId: req.shopId }).lean();
+    if (!shipment) return res.status(404).json({ error: 'Không tìm thấy phiếu đi đơn' });
+    const orders = await db.Order.find({ shopId: req.shopId, _id: { $in: shipment.orderIds } }).sort({ createdAt: 1 }).lean();
+    await db.createPrintJob(req.shopId, { ...holds.shipmentReport(shipment, orders), ref: `shipment:${shipment._id}` });
+    res.status(201).json({ ok: true });
+  }));
+
+  app.get('/api/customers/daily', handle('customers daily', async (req, res) => {
+    res.json(await holds.getDaily(req.shopId, req.query.date));
+  }));
+
+  app.post('/api/customers/daily/print', handle('customers daily print', async (req, res) => {
+    const daily = await holds.getDaily(req.shopId, req.body?.date);
+    await db.createPrintJob(req.shopId, { ...holds.dailyReport(daily), ref: `daily:${daily.date}` });
+    res.status(201).json({ ok: true });
   }));
 
   // ══════════════════════════════════════════════════════

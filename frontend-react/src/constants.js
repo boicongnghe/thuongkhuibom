@@ -2,7 +2,7 @@ export const STATUS_LABELS = {
   pending:   { label: 'Chờ xử lý',  cls: 'status-pending'   },
   deposit:   { label: 'Đặt cọc',    cls: 'status-deposit'   },
   confirmed: { label: 'Xác nhận',   cls: 'status-confirmed' },
-  shipping:  { label: 'Đang giao',  cls: 'status-shipping'  },
+  shipping:  { label: 'Đã đi đơn',  cls: 'status-shipping'  },
   completed: { label: 'Hoàn thành', cls: 'status-completed' },
   cancelled: { label: 'Đã hủy',     cls: 'status-cancelled' },
 };
