@@ -133,6 +133,7 @@ const pcStatusSchema = new mongoose.Schema({
   _id:       String,             // = shopId
   printer:   { type: Object, default: {} },
   tiktok:    { type: Object, default: {} },
+  appVersion: { type: String, default: '' },   // phiên bản app desktop ở shop
   updatedAt: { type: Date, default: null },
   desired:   { type: Object, default: { on: false, username: '' } },
 }, { minimize: false });
@@ -874,10 +875,10 @@ async function getChartData(shopId, period = 'day', count = 7) {
 // ══════════════════════════════════════════════════════════
 // Trạng thái app desktop + lệnh Live
 // ══════════════════════════════════════════════════════════
-async function saveAgentStatus(shopId, { printer, tiktok }) {
+async function saveAgentStatus(shopId, { printer, tiktok, appVersion }) {
   await PcStatus.updateOne(
     { _id: requireShop(shopId) },
-    { $set: { printer: printer || {}, tiktok: tiktok || {}, updatedAt: new Date() } },
+    { $set: { printer: printer || {}, tiktok: tiktok || {}, appVersion: appVersion || '', updatedAt: new Date() } },
     { upsert: true },
   );
 }

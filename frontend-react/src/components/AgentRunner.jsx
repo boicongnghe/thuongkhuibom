@@ -34,6 +34,8 @@ export default function AgentRunner() {
     let reconciling = false;
     let printing = false;
     let settings = null;
+    let appVersion = '';
+    agent.info?.().then(i => { appVersion = i?.version || ''; }).catch(() => {});
     const pending = [];           // bình luận chưa gửi được (mất mạng) → gửi lại
     const timers = [];
 
@@ -47,6 +49,7 @@ export default function AgentRunner() {
       try {
         const st = await agent.status();
         await api.reportAgentStatus({
+          appVersion,
           printer: st.printer,
           tiktok: { ...st.tiktok, sessionId: st.tiktok.connected || st.tiktok.connecting ? sessionId : null, error: st.tiktok.error || lastError },
         });
