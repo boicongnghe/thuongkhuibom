@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { authApi } from '../api/auth';
 import AdminPanel from '../components/AdminPanel';
@@ -122,6 +123,15 @@ export default function Settings() {
       {/* Header */}
       <div className="page-header">
         <h1 className="page-title">Cài đặt</h1>
+      </div>
+
+      {/* Điện thoại: Máy in + Đăng xuất (không có trên thanh dưới đáy) */}
+      <div className="mobile-only-links">
+        <Link to="/printer" className="mobile-link">🖨 Máy in</Link>
+        <button type="button" className="mobile-link danger" onClick={async () => {
+          try { await authApi.logout(); } catch { /* vẫn đăng xuất */ }
+          window.dispatchEvent(new Event('auth:expired'));
+        }}>↩ Đăng xuất</button>
       </div>
 
       {/* Tabs */}
