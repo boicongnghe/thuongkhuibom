@@ -52,7 +52,7 @@ function PasswordField({ id, label, value, onChange, autoComplete, describedBy, 
   );
 }
 
-export default function AuthPage({ onAuthenticated }) {
+export default function AuthPage({ onAuthenticated, onBack }) {
   const remembered = getRememberedUsername();
 
   const [registrationOpen, setRegistrationOpen] = useState(false);
@@ -146,6 +146,9 @@ export default function AuthPage({ onAuthenticated }) {
   return (
     <main className="auth-page">
       <div className="auth-card">
+        {onBack && (
+          <button type="button" className="auth-back" onClick={onBack}>← Trang chủ</button>
+        )}
         <div className="auth-brand">
           <div className="auth-logo" aria-hidden="true">C</div>
           <div>

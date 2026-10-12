@@ -5,6 +5,7 @@ import { authApi } from './api/auth';
 import { isAgent } from './agent';
 import AgentRunner from './components/AgentRunner';
 import AuthPage  from './components/AuthPage';
+import HomePage  from './components/HomePage';
 import Sidebar   from './components/Sidebar';
 import Toast     from './components/Toast';
 import Dashboard  from './pages/Dashboard';
@@ -31,13 +32,34 @@ export default function App() {
     return () => window.removeEventListener('auth:expired', onExpired);
   }, []);
 
+  // Chưa đăng nhập: trang chủ ở "/", trang đăng nhập ở "/dang-nhap".
+  // Trong app desktop thì vào thẳng đăng nhập (đã cài app rồi, không cần nút tải).
+  const [showAuth, setShowAuth] = useState(() => isAgent || window.location.pathname !== '/');
+  useEffect(() => {
+    const onPop = () => setShowAuth(isAgent || window.location.pathname !== '/');
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const goLogin = useCallback(() => {
+    window.history.pushState(null, '', '/dang-nhap');
+    setShowAuth(true);
+  }, []);
+  const goHome = useCallback(() => {
+    window.history.pushState(null, '', '/');
+    setShowAuth(false);
+  }, []);
+
   const handleLogout = useCallback(async () => {
     try { await authApi.logout(); } catch { /* vẫn đăng xuất ở giao diện */ }
     setUser(null);
   }, []);
 
   if (user === undefined) return <div className="auth-loading">Đang tải...</div>;
-  if (!user) return <AuthPage onAuthenticated={setUser} />;
+  if (!user) {
+    return showAuth
+      ? <AuthPage onAuthenticated={(u) => { setUser(u); window.history.replaceState(null, '', '/livestream'); }} onBack={isAgent ? null : goHome} />
+      : <HomePage onLogin={goLogin} />;
+  }
 
   return (
     <BrowserRouter>
@@ -56,6 +78,7 @@ export default function App() {
               <Route path="/stats"      element={<Stats />} />
               <Route path="/printer"    element={<Printer />} />
               <Route path="/settings"   element={<Settings />} />
+              <Route path="/dang-nhap"  element={<Navigate to="/livestream" replace />} />
               <Route path="*"           element={<Navigate to="/livestream" replace />} />
             </Routes>
           </div>

@@ -1,0 +1,90 @@
+/* ── Trang chủ (chưa đăng nhập) — có dark mode theo hệ điều hành ── */
+.home {
+  --h-bg: #F6F7FB;
+  --h-surface: #FFFFFF;
+  --h-border: #E2E8F0;
+  --h-text: #0F172A;
+  --h-muted: #475569;
+  --h-primary: #4F46E5;
+  --h-primary-h: #4338CA;
+  --h-soft: #EEF2FF;
+
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  background: var(--h-bg);
+  color: var(--h-text);
+  font-family: var(--font, 'Be Vietnam Pro', system-ui, sans-serif);
+}
+
+@media (prefers-color-scheme: dark) {
+  .home {
+    --h-bg: #0B1120;
+    --h-surface: #131B2E;
+    --h-border: #273449;
+    --h-text: #F1F5F9;
+    --h-muted: #A3B1C6;
+    --h-primary: #6366F1;
+    --h-primary-h: #818CF8;
+    --h-soft: #1E1B4B;
+    color-scheme: dark;
+  }
+}
+
+.home-top {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.home-brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; }
+.home-logo {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--h-primary); color: #FFFFFF; font-size: 20px; font-weight: 800;
+}
+
+.home main { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+.home-hero { padding: 48px 0 40px; text-align: center; }
+.home-hero h1 { font-size: clamp(30px, 6vw, 52px); line-height: 1.15; letter-spacing: -0.03em; font-weight: 800; }
+.home-lead { margin: 18px auto 0; max-width: 620px; font-size: 18px; line-height: 1.6; color: var(--h-muted); }
+.home-cta { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.home-hint { margin: 14px auto 0; max-width: 560px; font-size: 14px; line-height: 1.5; color: var(--h-muted); }
+
+.home-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 50px; padding: 0 22px; border-radius: 12px;
+  font: inherit; font-size: 16px; font-weight: 700; text-decoration: none; cursor: pointer;
+  border: 1px solid transparent;
+}
+.home-btn-primary { background: var(--h-primary); color: #FFFFFF; }
+.home-btn-primary:hover { background: var(--h-primary-h); color: #FFFFFF; }
+.home-btn-ghost { background: var(--h-surface); color: var(--h-text); border-color: var(--h-border); }
+.home-btn-ghost:hover { border-color: var(--h-primary); }
+.home-btn-disabled { background: var(--h-soft); color: var(--h-muted); cursor: default; font-weight: 600; font-size: 14px; text-align: center; }
+.home-btn:focus-visible { outline: 3px solid rgba(99, 102, 241, .45); outline-offset: 2px; }
+
+.home-section { padding: 28px 0; }
+.home-section h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 18px; text-align: center; }
+
+.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.home-card { background: var(--h-surface); border: 1px solid var(--h-border); border-radius: 14px; padding: 20px; }
+.home-card-icon { font-size: 26px; }
+.home-card h3 { font-size: 17px; margin-top: 10px; }
+.home-card p { margin-top: 6px; font-size: 15px; line-height: 1.55; color: var(--h-muted); }
+
+.home-steps { list-style: none; padding: 0; margin: 0 auto; max-width: 640px; display: flex; flex-direction: column; gap: 12px; }
+.home-steps li { display: flex; gap: 14px; align-items: flex-start; background: var(--h-surface); border: 1px solid var(--h-border); border-radius: 14px; padding: 16px 18px; }
+.home-step-num {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--h-soft); color: var(--h-primary); font-weight: 800;
+}
+.home-steps h3 { font-size: 16px; }
+.home-steps p { margin-top: 4px; font-size: 15px; line-height: 1.5; color: var(--h-muted); }
+
+.home-foot { text-align: center; padding: 32px 16px 40px; font-size: 13px; color: var(--h-muted); }

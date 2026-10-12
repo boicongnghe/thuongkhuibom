@@ -77,4 +77,8 @@ export const api = {
   createInvite: (note, days = 7)         => post('/api/admin/invites', { note, days }),
   revokeInvite: (code)                   => request(`/api/admin/invites/${encodeURIComponent(code)}`, { method: 'DELETE' }),
   getShops: ()                           => request('/api/admin/shops'),
+  setDownload: (body)                    => put('/api/admin/download', body),
+
+  // Công khai: link tải app desktop (trang chủ)
+  getDownload: ()                        => request('/api/public/download'),
 };

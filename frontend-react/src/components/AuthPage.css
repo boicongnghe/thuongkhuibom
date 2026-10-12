@@ -189,3 +189,11 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 15px; color: #64748B;
 }
+
+.auth-back {
+  align-self: flex-start;
+  min-height: 36px; padding: 0 4px;
+  border: 0; background: transparent; color: var(--a-muted);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.auth-back:hover { color: var(--a-text); }
