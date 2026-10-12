@@ -73,10 +73,9 @@ export const api = {
   saveSettings: (body)                   => put('/api/settings', body),
 
   // Quản trị dịch vụ (tài khoản đầu tiên)
-  getInvites: ()                         => request('/api/admin/invites'),
-  createInvite: (note, days = 7)         => post('/api/admin/invites', { note, days }),
-  revokeInvite: (code)                   => request(`/api/admin/invites/${encodeURIComponent(code)}`, { method: 'DELETE' }),
   getShops: ()                           => request('/api/admin/shops'),
+  // action: approve | reject | disable | enable
+  userAction: (username, action)         => post(`/api/admin/users/${encodeURIComponent(username)}/${action}`),
   setDownload: (body)                    => put('/api/admin/download', body),
 
   // Công khai: link tải app desktop (trang chủ)

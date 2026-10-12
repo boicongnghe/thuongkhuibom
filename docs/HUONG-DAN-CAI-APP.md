@@ -1,7 +1,7 @@
 # Hướng dẫn dùng Chốt Đơn Live (dành cho shop)
 
 Chốt Đơn Live giúp chốt đơn khi bán hàng TikTok Live: tự đọc bình luận, chốt đơn, in phiếu ra máy in nhiệt, thống kê đơn hàng.
-Bạn **không cần** cài database hay hiểu kỹ thuật. Chỉ cần **mã mời** do người cung cấp dịch vụ gửi.
+Bạn **không cần** cài database hay hiểu kỹ thuật. Chỉ cần đăng ký tài khoản và chờ người cung cấp dịch vụ **duyệt**.
 
 ## Bạn sẽ dùng thế nào
 
@@ -20,11 +20,12 @@ Bạn **không cần** cài database hay hiểu kỹ thuật. Chỉ cần **mã 
 
 ## 2. Đăng ký shop
 
-1. Trong app, chọn tab **Đăng ký**.
-2. Nhập **mã mời** (dạng `CD-XXXX-XXXX`), tên shop, tên đăng nhập và mật khẩu.
-3. Tích **Ghi nhớ đăng nhập** để không phải đăng nhập lại.
+1. Trong app (hoặc trên trang web), chọn tab **Đăng ký**.
+2. Nhập **tên shop**, **số điện thoại**, tên đăng nhập và mật khẩu → **Gửi yêu cầu đăng ký**.
+3. Báo người cung cấp dịch vụ để được **duyệt**. Trong lúc chờ, đăng nhập sẽ báo *"Tài khoản đang chờ quản trị duyệt"*.
+4. Khi được duyệt, đăng nhập bằng tài khoản vừa tạo. Nhớ tích **Ghi nhớ đăng nhập** để không phải đăng nhập lại.
 
-Mỗi mã mời chỉ dùng **1 lần** cho 1 shop. Dữ liệu của shop bạn **tách riêng hoàn toàn** với các shop khác.
+Dữ liệu của shop bạn **tách riêng hoàn toàn** với các shop khác.
 
 ## 3. Bán hàng
 
@@ -47,5 +48,6 @@ Mỗi mã mời chỉ dùng **1 lần** cho 1 shop. Dữ liệu của shop bạn
 |---|---|
 | Máy in "Chưa kết nối" | Bật máy in, cắm lại USB (nên cắm thẳng vào máy, không qua hub), thử cáp khác |
 | Không kết nối được TikTok | Phải **đang phát live** thì mới kết nối được. Kiểm tra lại tên `@tiktok` |
-| Mã mời không đúng / đã dùng / hết hạn | Xin người cung cấp dịch vụ gửi mã mới |
+| Tài khoản đang chờ quản trị duyệt | Báo người cung cấp dịch vụ duyệt cho bạn |
+| Tài khoản đã bị khoá / bị từ chối | Liên hệ người cung cấp dịch vụ |
 | Không mở được trang dịch vụ | Kiểm tra mạng internet |

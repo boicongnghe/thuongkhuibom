@@ -3,7 +3,6 @@
 // App desktop ở shop KHÔNG có chuỗi database: nó đăng nhập như người dùng và gọi các API dưới đây.
 require('dotenv').config();
 const express      = require('express');
-const crypto       = require('crypto');
 const cors         = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet       = require('helmet');
@@ -11,7 +10,6 @@ const helmet       = require('helmet');
 const db          = require('./src/database');
 const settings    = require('./src/settings');
 const authRoutes  = require('./src/authRoutes');
-const Invite      = require('./models/Invite');
 const User        = require('./models/User');
 const { getSecret, requireAuth, requireAppHeader, requireAdmin } = require('./src/authMiddleware');
 
@@ -57,13 +55,6 @@ function vnDayStart(daysBack = 0) {
 
 // App desktop báo trạng thái mỗi 10 giây; quá 45 giây không có tin → coi như app ở shop đang tắt
 const AGENT_STALE_SEC = 45;
-
-// Mã mời dễ đọc, bỏ các ký tự dễ nhầm (0/O, 1/I/L)
-const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-function newInviteCode() {
-  const pick = (n) => Array.from(crypto.randomBytes(n), b => INVITE_ALPHABET[b % INVITE_ALPHABET.length]).join('');
-  return `CD-${pick(4)}-${pick(4)}`;
-}
 
 // ── Order status machine ──────────────────────────────────
 const VALID_STATUSES = new Set(['pending', 'deposit', 'confirmed', 'shipping', 'completed', 'cancelled']);
@@ -133,42 +124,32 @@ function createApp() {
   app.use('/api', requireAuth);
 
   // ══════════════════════════════════════════════════════
-  // Quản trị dịch vụ: mã mời cho shop mới
+  // Quản trị dịch vụ: duyệt / khoá tài khoản shop
   // ══════════════════════════════════════════════════════
-  app.get('/api/admin/invites', requireAdmin, handle('admin/invites', async (req, res) => {
-    const list = await Invite.find().sort({ createdAt: -1 }).limit(100).lean();
-    res.json(list.map(i => ({
-      code: i.code, note: i.note, createdAt: i.createdAt, expiresAt: i.expiresAt,
-      usedBy: i.usedBy, usedAt: i.usedAt, revokedAt: i.revokedAt,
-      status: i.revokedAt ? 'revoked' : i.usedAt ? 'used' : new Date(i.expiresAt) < new Date() ? 'expired' : 'active',
-    })));
-  }));
+  const STATUS_ACTIONS = {
+    approve: { from: ['pending', 'rejected'], to: 'active' },
+    reject:  { from: ['pending'],             to: 'rejected' },
+    disable: { from: ['active'],              to: 'disabled' },
+    enable:  { from: ['disabled'],            to: 'active' },
+  };
 
-  app.post('/api/admin/invites', requireAdmin, handle('admin/invites create', async (req, res) => {
-    const days = Math.min(30, Math.max(1, parseInt(req.body?.days) || 7));
-    for (let i = 0; i < 5; i++) {
-      try {
-        const inv = await Invite.create({
-          code: newInviteCode(),
-          note: sanitizeStr(req.body?.note, 200),
-          createdBy: req.user.username,
-          expiresAt: new Date(Date.now() + days * 24 * 3600 * 1000),
-        });
-        return res.status(201).json({ code: inv.code, note: inv.note, expiresAt: inv.expiresAt });
-      } catch (err) {
-        if (err.code !== 11000) throw err;   // trùng mã (rất hiếm) → tạo lại
-      }
-    }
-    throw new Error('Không tạo được mã mời');
-  }));
+  app.post('/api/admin/users/:username/:action', requireAdmin, handle('admin/users action', async (req, res) => {
+    const rule = STATUS_ACTIONS[req.params.action];
+    if (!rule) return res.status(404).json({ error: 'Không tìm thấy API' });
+    const username = sanitizeStr(req.params.username, 30).toLowerCase();
+    if (username === req.user.username) return res.status(400).json({ error: 'Không thể tự đổi trạng thái tài khoản quản trị' });
 
-  app.delete('/api/admin/invites/:code', requireAdmin, handle('admin/invites revoke', async (req, res) => {
-    const r = await Invite.updateOne(
-      { code: sanitizeStr(req.params.code, 20).toUpperCase(), usedAt: null, revokedAt: null },
-      { $set: { revokedAt: new Date() } },
-    );
-    if (!r.modifiedCount) return res.status(404).json({ error: 'Không tìm thấy mã còn hiệu lực' });
-    res.json({ ok: true });
+    const target = await User.findOne({ username }).lean();
+    if (!target) return res.status(404).json({ error: 'Không tìm thấy tài khoản' });
+    const current = target.status || 'active';
+    if (!rule.from.includes(current)) return res.status(409).json({ error: `Tài khoản đang ở trạng thái "${current}", không làm được thao tác này` });
+
+    const update = { $set: { status: rule.to, reviewedBy: req.user.username, reviewedAt: new Date() } };
+    // Khoá / từ chối → đá văng mọi phiên đăng nhập đang mở
+    if (rule.to !== 'active') update.$inc = { tokenVersion: 1 };
+    await User.updateOne({ _id: target._id }, update);
+    console.log(`[Admin] ${req.user.username} ${req.params.action} ${username}`);
+    res.json({ ok: true, username, status: rule.to });
   }));
 
   // Đặt link tải app (Google Drive, GitHub Releases...) — đổi bản mới không cần deploy lại
@@ -193,8 +174,10 @@ function createApp() {
     res.json(users.map(u => {
       const shopId = u.shopId || String(u._id);
       return {
-        username: u.username, shopName: u.shopName || '', isAdmin: !!u.isAdmin,
-        createdAt: u.createdAt, lastLoginAt: u.lastLoginAt, orders: byShop.get(shopId) || 0,
+        username: u.username, shopName: u.shopName || '', phone: u.phone || '', isAdmin: !!u.isAdmin,
+        status: u.status || 'active',
+        createdAt: u.createdAt, lastLoginAt: u.lastLoginAt, reviewedAt: u.reviewedAt || null,
+        orders: byShop.get(shopId) || 0,
       };
     }));
   }));

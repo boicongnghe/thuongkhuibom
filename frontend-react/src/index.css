@@ -971,3 +971,11 @@ textarea.form-input { resize: vertical; min-height: 72px; }
 .invite-code { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 24px; font-weight: 700; letter-spacing: .08em; color: var(--primary-dark); }
 .printed-badge.print-pending { color: #B45309; }
 .printed-badge.print-error { color: #B91C1C; }
+
+/* Quản trị: duyệt đăng ký */
+.approve-list { display: flex; flex-direction: column; gap: 10px; }
+.approve-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); }
+.approve-info { min-width: 0; flex: 1 1 240px; }
+.approve-name { font-weight: 700; font-size: 15px; }
+.approve-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.approve-actions { display: flex; gap: 8px; }

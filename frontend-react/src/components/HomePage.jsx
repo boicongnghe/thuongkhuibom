@@ -12,7 +12,7 @@ const FEATURES = [
 const STEPS = [
   { title: 'Tải app cho máy tính', text: 'Cài trên máy tính Windows có cắm máy in nhiệt.' },
   { title: 'Chọn máy in', text: 'Mở app, chọn máy in trong danh sách, bấm Lưu.' },
-  { title: 'Đăng ký bằng mã mời', text: 'Nhập mã mời được gửi cho bạn, đặt tên đăng nhập và mật khẩu.' },
+  { title: 'Đăng ký, chờ duyệt', text: 'Bấm Đăng ký, nhập tên shop và mật khẩu. Quản trị duyệt xong là bạn đăng nhập dùng ngay.' },
 ];
 
 // Trang chủ (chưa đăng nhập): giới thiệu + nút tải app + đăng nhập

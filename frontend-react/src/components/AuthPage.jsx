@@ -65,13 +65,12 @@ export default function AuthPage({ onAuthenticated, onBack }) {
   const [error, setError]       = useState('');
   const [notice, setNotice]     = useState('');
   const [serverDown, setServerDown] = useState(false);
-  const [needsInvite, setNeedsInvite] = useState(true);
-  const [inviteCode, setInviteCode] = useState('');
   const [shopName, setShopName]   = useState('');
+  const [phone, setPhone]         = useState('');
   const [checking, setChecking] = useState(true);
   const submitting = useRef(false);
 
-  // Dịch vụ nhiều shop: tài khoản đầu tiên là quản trị; shop sau đăng ký bằng mã mời
+  // Dịch vụ nhiều shop: tài khoản đầu tiên là quản trị; shop sau đăng ký xong chờ quản trị duyệt
   async function checkStatus() {
     setChecking(true);
     try {
@@ -79,10 +78,9 @@ export default function AuthPage({ onAuthenticated, onBack }) {
       if (typeof res?.registrationOpen !== 'boolean') throw new Error('bad response');
       setServerDown(false);
       setRegistrationOpen(res.registrationOpen);
-      setNeedsInvite(!!res.needsInvite);
       if (res.firstUser) {
         setTab('register');
-        setNotice('Dịch vụ chưa có tài khoản nào. Tài khoản bạn tạo bây giờ là tài khoản QUẢN TRỊ (tạo mã mời cho các shop khác).');
+        setNotice('Dịch vụ chưa có tài khoản nào. Tài khoản bạn tạo bây giờ là tài khoản QUẢN TRỊ (duyệt đăng ký của các shop khác).');
       } else {
         setNotice('');
       }
@@ -117,7 +115,7 @@ export default function AuthPage({ onAuthenticated, onBack }) {
     if (isRegister) {
       const invalid = validateUsername(name) || validatePassword(password)
         || (password !== confirm ? 'Mật khẩu nhập lại không khớp' : null)
-        || (needsInvite && !inviteCode.trim() ? 'Nhập mã mời do người cung cấp dịch vụ gửi cho bạn' : null);
+        || (!shopName.trim() ? 'Vui lòng nhập tên shop' : null);
       if (invalid) { setError(invalid); return; }
     } else if (!name || !password) {
       setError('Vui lòng nhập tên đăng nhập và mật khẩu');
@@ -128,9 +126,22 @@ export default function AuthPage({ onAuthenticated, onBack }) {
     setLoading(true);
     try {
       const body = { username: name, password, remember };
-      const user = isRegister
-        ? await authApi.register({ ...body, inviteCode: inviteCode.trim(), shopName: shopName.trim() })
-        : await authApi.login(body);
+      if (isRegister) {
+        const res = await authApi.register({ ...body, shopName: shopName.trim(), phone: phone.trim() });
+        if (res.pending) {
+          // Chờ quản trị duyệt: chưa đăng nhập được, chuyển sang tab Đăng nhập
+          setRememberedUsername(remember ? name : '');
+          setPassword('');
+          setConfirm('');
+          setTab('login');
+          setNotice(`✓ ${res.message}`);
+          return;
+        }
+        setRememberedUsername(remember ? name : '');
+        onAuthenticated(res.user);
+        return;
+      }
+      const user = await authApi.login(body);
       setRememberedUsername(remember ? name : '');
       setPassword('');
       setConfirm('');
@@ -195,37 +206,34 @@ export default function AuthPage({ onAuthenticated, onBack }) {
           {notice && !error && <div className="auth-msg auth-msg-info" role="status">{notice}</div>}
           {error && <div className="auth-msg auth-msg-error" role="alert">{error}</div>}
 
-          {isRegister && needsInvite && (
-            <div className="auth-field">
-              <label htmlFor="auth-invite">Mã mời</label>
-              <input
-                id="auth-invite"
-                type="text"
-                value={inviteCode}
-                onChange={e => setInviteCode(e.target.value.toUpperCase())}
-                placeholder="CD-XXXX-XXXX"
-                autoComplete="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                maxLength={20}
-                aria-describedby="hint-invite"
-                required
-              />
-              <small id="hint-invite">Người cung cấp dịch vụ gửi cho bạn. Mỗi mã dùng cho 1 shop.</small>
-            </div>
-          )}
           {isRegister && (
-            <div className="auth-field">
-              <label htmlFor="auth-shop">Tên shop</label>
-              <input
-                id="auth-shop"
-                type="text"
-                value={shopName}
-                onChange={e => setShopName(e.target.value)}
-                placeholder="Shop của bạn"
-                maxLength={100}
-              />
-            </div>
+            <>
+              <div className="auth-field">
+                <label htmlFor="auth-shop">Tên shop</label>
+                <input
+                  id="auth-shop"
+                  type="text"
+                  value={shopName}
+                  onChange={e => setShopName(e.target.value)}
+                  placeholder="Shop của bạn"
+                  maxLength={100}
+                  required
+                />
+              </div>
+              <div className="auth-field">
+                <label htmlFor="auth-phone">Số điện thoại (để quản trị liên hệ khi duyệt)</label>
+                <input
+                  id="auth-phone"
+                  type="tel"
+                  inputMode="tel"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  placeholder="0912 345 678"
+                  autoComplete="tel"
+                  maxLength={20}
+                />
+              </div>
+            </>
           )}
 
           <div className="auth-field">
@@ -277,7 +285,7 @@ export default function AuthPage({ onAuthenticated, onBack }) {
           </label>
 
           <button type="submit" className="auth-submit" disabled={loading} aria-busy={loading}>
-            {loading ? 'Đang xử lý...' : isRegister ? 'Tạo tài khoản' : 'Đăng nhập'}
+            {loading ? 'Đang xử lý...' : isRegister ? 'Gửi yêu cầu đăng ký' : 'Đăng nhập'}
           </button>
         </form>
       </div>
