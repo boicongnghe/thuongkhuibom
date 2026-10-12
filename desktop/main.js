@@ -8,7 +8,8 @@ const path   = require('path');
 // Thư mục dữ liệu riêng (dùng khi test hoặc chạy bản portable) — mặc định %APPDATA%\Chot Don Live
 if (process.env.CHOTDON_USER_DATA) app.setPath('userData', process.env.CHOTDON_USER_DATA);
 
-const config = require('./config');
+const config  = require('./config');
+const updater = require('./updater');
 
 const APP_TITLE   = 'Chốt Đơn Live';
 const ICON        = path.join(__dirname, 'icon.png');
@@ -47,6 +48,19 @@ function boot() {
   createTray();
   createMain();
   if (!startHidden) showMain();
+
+  // Tự cập nhật: tải ngầm, đang Live thì không làm phiền (cài khi tắt app)
+  updater.setup({
+    isLive: () => !!(agent.state.connected || agent.state.connecting),
+    window: () => mainWin,
+    beforeInstall: () => { quitting = true; },
+    onChange: (st) => {
+      refreshTrayMenu();
+      if (st.status === 'ready' && agent.state.connected && tray) {
+        tray.displayBalloon?.({ title: APP_TITLE, content: `Đã tải bản mới ${st.version}. App sẽ tự cập nhật khi bạn tắt app (không làm gián đoạn Live).` });
+      }
+    },
+  });
 }
 
 function send(channel, data) {
@@ -119,6 +133,7 @@ function createTray() {
 }
 
 function refreshTrayMenu() {
+  if (!tray) return;
   const autoStart = app.getLoginItemSettings().openAtLogin;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Mở ${APP_TITLE}`, click: showMain },
@@ -135,8 +150,19 @@ function refreshTrayMenu() {
     },
     { label: 'Đổi máy in / địa chỉ dịch vụ…', click: () => openSetup() },
     { type: 'separator' },
+    ...updateMenuItems(),
+    { type: 'separator' },
     { label: 'Thoát', click: () => { quitting = true; app.quit(); } },
   ]));
+}
+
+function updateMenuItems() {
+  const st = updater.state;
+  const v = app.getVersion();
+  if (st.status === 'ready') return [{ label: `⬆ Cập nhật lên bản ${st.version} (khởi động lại)`, click: () => updater.installNow() }];
+  if (st.status === 'downloading') return [{ label: `Đang tải bản mới ${st.version || ''}… ${st.percent}%`, enabled: false }];
+  if (st.status === 'checking') return [{ label: `Phiên bản ${v} · đang kiểm tra cập nhật…`, enabled: false }];
+  return [{ label: `Phiên bản ${v}${st.status === 'latest' ? ' (mới nhất)' : ''} · Kiểm tra cập nhật`, click: () => updater.check() }];
 }
 
 // ── Cửa sổ cài đặt (lần đầu hoặc khi đổi máy in / địa chỉ) ─

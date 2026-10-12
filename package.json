@@ -1,6 +1,6 @@
 {
   "name": "tiktok-chot-don",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Phần mềm chốt đơn realtime cho người bán hàng livestream TikTok",
   "main": "desktop/main.js",
   "scripts": {
@@ -14,7 +14,8 @@
     "test:integration": "jest tests/integration --runInBand --forceExit",
     "test:coverage": "jest --coverage --runInBand --forceExit",
     "desktop": "electron .",
-    "dist:win": "npm run build && electron-builder --win --x64"
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "release:win": "electron-builder --win --x64 --publish always"
   },
   "jest": {
     "testEnvironment": "node",
@@ -39,6 +40,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.8.9",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
@@ -83,7 +85,7 @@
         }
       ],
       "icon": "desktop/icon.png",
-      "artifactName": "ChotDonLive-Setup-${version}.${ext}"
+      "artifactName": "ChotDonLive-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -94,6 +96,14 @@
       "shortcutName": "Chốt Đơn Live",
       "uninstallDisplayName": "Chốt Đơn Live",
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "boicongnghe",
+        "repo": "chotdon-releases",
+        "releaseType": "release"
+      }
+    ]
   }
 }

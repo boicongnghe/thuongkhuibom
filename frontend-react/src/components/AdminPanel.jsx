@@ -136,7 +136,7 @@ export default function AdminPanel({ onPendingChange }) {
         <div className="settings-card-body">
           <div className="table-scroll">
             <table className="data-table">
-              <thead><tr><th>Shop</th><th>Trạng thái</th><th>Số đơn</th><th>Đăng nhập gần nhất</th><th></th></tr></thead>
+              <thead><tr><th>Shop</th><th>Trạng thái</th><th>Số đơn</th><th>App ở shop</th><th>Đăng nhập gần nhất</th><th></th></tr></thead>
               <tbody>
                 {others.map(s => (
                   <tr key={s.username}>
@@ -146,6 +146,7 @@ export default function AdminPanel({ onPendingChange }) {
                     </td>
                     <td>{STATUS_TEXT[s.status] || s.status}</td>
                     <td>{s.orders}</td>
+                    <td>{s.appVersion ? `v${s.appVersion}` : '—'}{s.appSeenAt ? <div className="table-sub">{formatDateTime(s.appSeenAt)}</div> : null}</td>
                     <td>{s.lastLoginAt ? formatDateTime(s.lastLoginAt) : '—'}</td>
                     <td className="actions-cell">
                       {!s.isAdmin && s.status === 'active'   && <button type="button" className="btn-status-change" disabled={busy === s.username} onClick={() => act(s.username, 'disable')}>Khoá</button>}

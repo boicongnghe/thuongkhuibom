@@ -172,6 +172,8 @@ function createApp() {
     const users = await User.find().sort({ createdAt: 1 }).limit(500).lean();
     const counts = await db.Order.aggregate([{ $group: { _id: '$shopId', orders: { $sum: 1 } } }]);
     const byShop = new Map(counts.map(c => [c._id, c.orders]));
+    const agents = await db.PcStatus.find().select('appVersion updatedAt').lean();
+    const agentOf = new Map(agents.map(a => [a._id, a]));
     res.json(users.map(u => {
       const shopId = u.shopId || String(u._id);
       return {
@@ -179,6 +181,8 @@ function createApp() {
         status: u.status || 'active',
         createdAt: u.createdAt, lastLoginAt: u.lastLoginAt, reviewedAt: u.reviewedAt || null,
         orders: byShop.get(shopId) || 0,
+        appVersion: agentOf.get(shopId)?.appVersion || '',
+        appSeenAt: agentOf.get(shopId)?.updatedAt || null,
       };
     }));
   }));
@@ -231,6 +235,7 @@ function createApp() {
     const p = req.body?.printer || {};
     const t = req.body?.tiktok || {};
     await db.saveAgentStatus(req.shopId, {
+      appVersion: /^\d+\.\d+\.\d+$/.test(req.body?.appVersion || '') ? req.body.appVersion : '',
       printer: { ok: p.ok === true, printerName: sanitizeStr(p.printerName, 200), status: sanitizeStr(p.status, 100) },
       tiktok: {
         connected:  t.connected === true,
