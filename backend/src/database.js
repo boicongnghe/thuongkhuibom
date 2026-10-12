@@ -796,8 +796,25 @@ async function setDesiredLive(shopId, { on, username }) {
   return desired;
 }
 
+// ══════════════════════════════════════════════════════════
+// Link tải app desktop (quản trị đặt, trang chủ hiện nút tải)
+// ══════════════════════════════════════════════════════════
+const DOWNLOAD_ID = '__app_download';
+
+async function getAppDownload() {
+  const doc = await mongoose.connection.collection('settings').findOne({ _id: DOWNLOAD_ID });
+  return { url: doc?.url || '', version: doc?.version || '', note: doc?.note || '', updatedAt: doc?.updatedAt || null };
+}
+
+async function setAppDownload({ url, version, note }) {
+  const value = { url, version, note, updatedAt: new Date() };
+  await mongoose.connection.collection('settings').updateOne({ _id: DOWNLOAD_ID }, { $set: value }, { upsert: true });
+  return value;
+}
+
 module.exports = {
   connectDB, businessError,
+  getAppDownload, setAppDownload,
   createSession, endSession, getLatestSessionId, getSession,
   saveComments, getCommentById, getRecentComments,
   createOrder, createOrderFromComment, getOrderByCommentId, getOrderById,

@@ -14,6 +14,8 @@ export default function AdminPanel() {
   const [days, setDays]         = useState(7);
   const [creating, setCreating] = useState(false);
   const [newCode, setNewCode]   = useState(null);
+  const [dl, setDl]             = useState({ url: '', version: '', note: '' });
+  const [savingDl, setSavingDl] = useState(false);
 
   async function load() {
     try {
@@ -25,7 +27,25 @@ export default function AdminPanel() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.getDownload().then(d => setDl({ url: d.url || '', version: d.version || '', note: d.note || '' })).catch(() => {});
+  }, []);
+
+  async function saveDownload(e) {
+    e.preventDefault();
+    if (savingDl) return;
+    setSavingDl(true);
+    try {
+      const d = await api.setDownload(dl);
+      setDl({ url: d.url, version: d.version, note: d.note });
+      showToast(d.url ? 'Đã lưu link tải — nút "Tải app" trên trang chủ dùng link này' : 'Đã xoá link tải', 'success');
+    } catch (err) {
+      showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setSavingDl(false);
+    }
+  }
 
   async function create(e) {
     e.preventDefault();
@@ -64,11 +84,46 @@ export default function AdminPanel() {
   }
 
   const shareText = newCode
-    ? `Mời bạn dùng Chốt Đơn Live.\n1. Cài app hoặc mở: ${window.location.origin}\n2. Bấm "Đăng ký", nhập mã mời: ${newCode.code}\n(Mã dùng 1 lần, hết hạn ${formatDate(newCode.expiresAt)})`
+    ? `Mời bạn dùng Chốt Đơn Live.\n1. Mở ${window.location.origin} → bấm "Tải app cho máy tính", cài trên máy cắm máy in.\n2. Mở app, chọn máy in → Lưu.\n3. Bấm "Đăng ký", nhập mã mời: ${newCode.code}\n(Mã dùng 1 lần, hết hạn ${formatDate(newCode.expiresAt)}. Điện thoại: đăng nhập tại ${window.location.origin})`
     : '';
 
   return (
     <div className="settings-scroll">
+      <div className="settings-card">
+        <div className="settings-card-head">
+          <div className="settings-card-title-group">
+            <span className="settings-card-icon">⬇️</span>
+            <h2 className="settings-card-title">Link tải app cho máy tính</h2>
+          </div>
+        </div>
+        <div className="settings-card-body">
+          <p className="form-hint" style={{ marginBottom: 12 }}>
+            Tải file <code>ChotDonLive-Setup-….exe</code> lên Google Drive (Chia sẻ → Bất kỳ ai có đường liên kết), rồi dán link vào đây.
+            Nút "Tải app" trên trang chủ <b>{window.location.origin}</b> sẽ dẫn tới link này. Có bản mới thì chỉ cần dán link mới.
+          </p>
+          <form onSubmit={saveDownload} className="form-grid">
+            <div className="form-group form-group-full">
+              <label className="form-label" htmlFor="dl-url">Link tải (https://…)</label>
+              <input id="dl-url" type="url" className="form-input" maxLength={1000} placeholder="https://drive.google.com/file/d/…/view"
+                value={dl.url} onChange={e => setDl(p => ({ ...p, url: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="dl-ver">Phiên bản</label>
+              <input id="dl-ver" className="form-input" maxLength={30} placeholder="1.0.0"
+                value={dl.version} onChange={e => setDl(p => ({ ...p, version: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="dl-note">Ghi chú (hiện dưới nút tải)</label>
+              <input id="dl-note" className="form-input" maxLength={300} placeholder="vd: Bản mới sửa lỗi in"
+                value={dl.note} onChange={e => setDl(p => ({ ...p, note: e.target.value }))} />
+            </div>
+            <div className="form-group form-group-full">
+              <button type="submit" className="btn-save-store" disabled={savingDl}>{savingDl ? 'Đang lưu...' : 'Lưu link tải'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <div className="settings-card">
         <div className="settings-card-head">
           <div className="settings-card-title-group">

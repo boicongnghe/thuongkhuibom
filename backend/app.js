@@ -123,6 +123,13 @@ function createApp() {
   // ── Auth: /api/auth tự do, mọi /api khác phải đăng nhập ─
   app.use('/api', requireAppHeader);
   app.use('/api/auth', authRoutes);
+
+  // Công khai (trang chủ): link tải app desktop do quản trị đặt
+  app.get('/api/public/download', handle('public/download', async (req, res) => {
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json(await db.getAppDownload());
+  }));
+
   app.use('/api', requireAuth);
 
   // ══════════════════════════════════════════════════════
@@ -162,6 +169,21 @@ function createApp() {
     );
     if (!r.modifiedCount) return res.status(404).json({ error: 'Không tìm thấy mã còn hiệu lực' });
     res.json({ ok: true });
+  }));
+
+  // Đặt link tải app (Google Drive, GitHub Releases...) — đổi bản mới không cần deploy lại
+  app.put('/api/admin/download', requireAdmin, handle('admin/download', async (req, res) => {
+    const url = sanitizeStr(req.body?.url, 1000);
+    if (url) {
+      let u;
+      try { u = new URL(url); } catch { u = null; }
+      if (!u || u.protocol !== 'https:') return res.status(400).json({ error: 'Link tải phải bắt đầu bằng https://' });
+    }
+    res.json(await db.setAppDownload({
+      url,
+      version: sanitizeStr(req.body?.version, 30),
+      note:    sanitizeStr(req.body?.note, 300),
+    }));
   }));
 
   app.get('/api/admin/shops', requireAdmin, handle('admin/shops', async (req, res) => {
