@@ -11,3 +11,6 @@ frontend-react/dist/
 .vercel/
 .env.local
 /dist/
+
+# App desktop (electron-builder)
+release/

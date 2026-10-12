@@ -5,7 +5,9 @@ const path = require('path');
 const PRINTER_NAME  = process.env.PRINTER_NAME  || 'POS-58';
 const PRINTER_WIDTH = parseInt(process.env.PRINTER_WIDTH || '58', 10);
 const SHOP_NAME     = process.env.SHOP_NAME     || 'SHOP CUA BAN';
-const PS_SCRIPT     = path.join(__dirname, 'raw_print.ps1');
+// App desktop (Electron) nén code vào app.asar — PowerShell không đọc được file trong đó,
+// nên raw_print.ps1 được để ngoài ở app.asar.unpacked (xem build.asarUnpack trong package.json)
+const PS_SCRIPT     = path.join(__dirname, 'raw_print.ps1').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 
 const LINE_WIDTH = 32;
 const DIVIDER    = '='.repeat(LINE_WIDTH);

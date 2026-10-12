@@ -2,7 +2,7 @@
   "name": "tiktok-chot-don",
   "version": "1.0.0",
   "description": "Phần mềm chốt đơn realtime cho người bán hàng livestream TikTok",
-  "main": "backend/server.js",
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node backend/server.js",
     "dev:backend": "nodemon backend/server.js",
@@ -12,7 +12,9 @@
     "test": "jest --runInBand --forceExit",
     "test:unit": "jest tests/unit --runInBand --forceExit",
     "test:integration": "jest tests/integration --runInBand --forceExit",
-    "test:coverage": "jest --coverage --runInBand --forceExit"
+    "test:coverage": "jest --coverage --runInBand --forceExit",
+    "desktop": "electron .",
+    "dist:win": "npm run build && electron-builder --win --x64"
   },
   "jest": {
     "testEnvironment": "node",
@@ -29,7 +31,7 @@
     "chot-don",
     "thermal-printer"
   ],
-  "author": "",
+  "author": "Chot Don Live",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
@@ -47,9 +49,51 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
+    "electron": "^41.7.1",
+    "electron-builder": "^25.1.8",
     "jest": "^29.7.0",
     "mongodb-memory-server": "^10.1.2",
     "nodemon": "^3.1.0",
     "supertest": "^7.0.0"
+  },
+  "build": {
+    "appId": "vn.chotdon.live",
+    "productName": "Chot Don Live",
+    "copyright": "Chốt Đơn Live",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "backend/**/*",
+      "desktop/**/*",
+      "!desktop/make-icon.js",
+      "frontend-react-dist/**/*"
+    ],
+    "asarUnpack": [
+      "backend/src/raw_print.ps1"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "desktop/icon.png",
+      "artifactName": "ChotDonLive-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Chốt Đơn Live",
+      "uninstallDisplayName": "Chốt Đơn Live",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
